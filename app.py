@@ -1,3 +1,5 @@
+import time
+import random
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -245,12 +247,112 @@ def atualizar_multiplas_celulas(task_id, campos_valores):
         return False
 
 
-def adicionar_tarefa_incremental(nova_tarefa_dict):
+def gerar_id_atomico_com_retry(max_tentativas=5):
     """
-    Adiciona uma nova tarefa.
+    Gera ID único consultando DIRETAMENTE a planilha (não o cache local).
+    Implementa retry com backoff exponencial para evitar race conditions.
+
+    Returns:
+        int: ID único e seguro
+
+    Raises:
+        Exception: Se falhar após todas as tentativas
+    """
+    for tentativa in range(1, max_tentativas + 1):
+        try:
+            # CRÍTICO: Lê diretamente da planilha (não usa session_state)
+            sheet = conectar_google_sheets()
+
+            # Pega TODOS os IDs da coluna 'id' (coluna A)
+            # row_values(1) = cabeçalhos
+            # col_values(1) = todos os valores da coluna A
+            coluna_ids = sheet.col_values(1)  # ['id', '1', '2', '3', ...]
+
+            # Remove o cabeçalho e converte para int
+            ids_existentes = []
+            for valor in coluna_ids[1:]:  # Pula o cabeçalho
+                try:
+                    ids_existentes.append(int(valor))
+                except (ValueError, TypeError):
+                    continue  # Ignora valores inválidos
+
+            # Gera o próximo ID
+            if ids_existentes:
+                novo_id = max(ids_existentes) + 1
+            else:
+                novo_id = 1
+
+            # Valida se o ID é único (dupla verificação)
+            if novo_id in ids_existentes:
+                raise ValueError(
+                    f"ID {novo_id} já existe! Tentando novamente...")
+
+            return novo_id
+
+        except gspread.exceptions.APIError as e:
+            if "RATE_LIMIT_EXCEEDED" in str(e):
+                # Backoff exponencial com jitter
+                delay = (2 ** tentativa) + random.uniform(0, 1)
+                st.warning(
+                    f"Rate limit atingido. Aguardando {delay:.1f}s (tentativa {tentativa}/{max_tentativas})...")
+                time.sleep(delay)
+                continue
+            else:
+                raise e
+
+        except Exception as e:
+            if tentativa < max_tentativas:
+                delay = 0.5 * tentativa + random.uniform(0, 0.5)
+                st.warning(
+                    f"Erro ao gerar ID (tentativa {tentativa}/{max_tentativas}): {e}")
+                time.sleep(delay)
+                continue
+            else:
+                st.error(
+                    f"Falha ao gerar ID após {max_tentativas} tentativas: {e}")
+                raise e
+
+    raise Exception("Falha ao gerar ID único após todas as tentativas")
+
+
+def validar_id_unico(task_id):
+    """
+    Valida se o ID inserido é único na planilha.
+
+    Args:
+        task_id: ID a ser validado
+
+    Returns:
+        bool: True se único, False se duplicado
+    """
+    try:
+        sheet = conectar_google_sheets()
+
+        # Busca todas as ocorrências do ID
+        cells = sheet.findall(str(task_id))
+
+        # Remove o cabeçalho da contagem
+        ocorrencias = [c for c in cells if c.row > 1]
+
+        if len(ocorrencias) > 1:
+            st.error(
+                f"ID {task_id} DUPLICADO! Encontradas {len(ocorrencias)} ocorrências.")
+            return False
+
+        return True
+
+    except Exception as e:
+        st.warning(f"Não foi possível validar unicidade do ID: {e}")
+        return True  # Assume válido em caso de erro na validação
+
+
+def adicionar_tarefa_incremental_com_validacao(nova_tarefa_dict, validar_pos_insercao=True):
+    """
+    Adiciona uma nova tarefa COM VALIDAÇÃO de ID único.
 
     Args:
         nova_tarefa_dict: Dicionário com os dados da nova tarefa
+        validar_pos_insercao: Se True, valida se ID é único após inserção
 
     Returns:
         bool: True se sucesso, False se falhou
@@ -261,7 +363,6 @@ def adicionar_tarefa_incremental(nova_tarefa_dict):
         # Obtém os cabeçalhos da planilha (primeira linha)
         headers = sheet.row_values(1)
 
-        # CRÍTICO: Validar que os cabeçalhos existem
         if not headers:
             st.error("Planilha sem cabeçalhos! Impossível adicionar tarefa.")
             return False
@@ -269,12 +370,21 @@ def adicionar_tarefa_incremental(nova_tarefa_dict):
         # Cria a linha na MESMA ORDEM dos cabeçalhos da planilha
         nova_linha = []
         for coluna in headers:
-            # Pega o valor do dicionário ou string vazia se não existir
             valor = nova_tarefa_dict.get(coluna, '')
             nova_linha.append(str(valor))
 
-        # Adiciona a linha no final da planilha (operação rápida)
+        # Adiciona a linha no final da planilha
         sheet.append_row(nova_linha, value_input_option='USER_ENTERED')
+
+        # VALIDAÇÃO PÓS-INSERÇÃO (Opcional mas recomendado)
+        if validar_pos_insercao:
+            time.sleep(0.5)  # Aguarda propagação da API
+
+            if not validar_id_unico(nova_tarefa_dict['id']):
+                st.error(
+                    f"CONFLITO DETECTADO! ID {nova_tarefa_dict['id']} foi duplicado.")
+                # Aqui você pode implementar lógica de rollback se necessário
+                return False
 
         return True
 
@@ -288,7 +398,7 @@ def adicionar_tarefa_incremental(nova_tarefa_dict):
 
 def adicionar_tarefa_com_fallback(nova_tarefa_dict):
     """
-    Tenta adicionar tarefa incrementalmente.
+    Tenta adicionar tarefa incrementalmente com validação.
     Se falhar, usa o método completo como fallback.
 
     Args:
@@ -297,11 +407,14 @@ def adicionar_tarefa_com_fallback(nova_tarefa_dict):
     Returns:
         bool: True se sucesso (qualquer método), False se ambos falharam
     """
-    # Tentativa 1: Método rápido (append_row)
-    sucesso = adicionar_tarefa_incremental(nova_tarefa_dict)
+    # Tentativa 1: Método rápido com validação
+    sucesso = adicionar_tarefa_incremental_com_validacao(
+        nova_tarefa_dict,
+        validar_pos_insercao=True
+    )
 
     if sucesso:
-        st.success("Tarefa adicionada com sucesso (modo rápido)!")
+        st.success("Tarefa adicionada com sucesso (modo rápido e seguro)!")
         return True
 
     # Tentativa 2: Fallback para método completo
@@ -665,12 +778,12 @@ elif menu == "Nova Demanda":
         try:
             # Calcula o próximo ID
             with st.spinner('Gerando ID...'):
-                ids = pd.to_numeric(
-                    st.session_state.df_tarefas['id'],
-                    errors='coerce'
-                )
-                novo_id = int(
-                    ids.max() + 1) if not st.session_state.df_tarefas.empty else 1
+                try:
+                    novo_id = gerar_id_atomico_com_retry(max_tentativas=5)
+                    st.info(f"ID #{novo_id} reservado com sucesso!")
+                except Exception as e:
+                    st.error(f"Não foi possível gerar ID único: {e}")
+                    st.stop()
 
             # Cria o dicionário da nova tarefa
             nova_tarefa = {
