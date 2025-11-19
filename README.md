@@ -122,7 +122,7 @@ Contribuições são bem-vindas! Siga estes passos:
 
 Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalhes.
 
-## 👨Autor
+## Autor
 
 **Felipe Toledo**
 - LinkedIn: [Seu LinkedIn](https://linkedin.com/in/felipetoledo-8)
