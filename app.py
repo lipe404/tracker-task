@@ -557,7 +557,7 @@ elif menu == "Configurações":
     st.subheader("Conexão Google Sheets")
     st.info(f"Conectado à planilha: **{NOME_PLANILHA}**")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
         if st.button("Recarregar Dados", use_container_width=True):
@@ -570,15 +570,6 @@ elif menu == "Configurações":
         if st.button("Limpar Cache", use_container_width=True):
             limpar_cache_conexao()
             st.success("Cache limpo!")
-            st.rerun()
-
-    with col3:
-        st.warning("⚠️ Cuidado: Apaga tudo")
-        if st.button("🔥 Resetar Planilha", use_container_width=True):
-            sheet = conectar_google_sheets()
-            criar_dados_iniciais(sheet)
-            st.session_state.df_tarefas = carregar_dados()
-            st.success("Planilha resetada!")
             st.rerun()
 
     st.divider()
