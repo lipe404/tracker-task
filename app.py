@@ -683,7 +683,6 @@ elif menu == "Quadro Kanban":
 # --- PÁGINA: NOVA DEMANDA ---
 elif menu == "Nova Demanda":
     st.header("Cadastro de Nova Demanda")
-    st.caption("Sistema otimizado com adição incremental - até 10x mais rápido!")
 
     # Controle de estado para exibir resumo
     if 'tarefa_cadastrada' not in st.session_state:
