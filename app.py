@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import os
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -13,56 +15,99 @@ st.set_page_config(
 )
 
 # --- CONSTANTES E SETUP ---
-ARQUIVO_DADOS = "dados_educamais.csv"
+# Nome da planilha exato como está no seu Google Drive
+NOME_PLANILHA = "Tasks Devs"
+ARQUIVO_CREDENCIAIS = "credentials.json"
+
 COLUNAS_KANBAN = ["Backlog/A Fazer",
                   "Em Desenvolvimento", "Code Review/QA", "Concluído"]
-DESENVOLVEDORES = ["Pedro", "Israel", "Vinícius", "Eduardo"]
+DESENVOLVEDORES = ["Eduardo", "Israel", "Pedro", "Vinícius"]
 TIPOS_TAREFA = ["Feature (Nova Funcionalidade)",
                 "Bugfix (Correção)", "Refatoração", "Infraestrutura"]
 
-# --- FUNÇÕES DE PERSISTÊNCIA DE DADOS ---
+# Escopos necessários para acessar o Google Sheets
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# --- FUNÇÕES DE CONEXÃO COM GOOGLE SHEETS ---
+
+
+def conectar_google_sheets():
+    """Estabelece conexão com o Google Sheets usando Service Account."""
+    try:
+        if not os.path.exists(ARQUIVO_CREDENCIAIS):
+            st.error("Arquivo 'credentials.json' não encontrado! Por favor, adicione o arquivo de credenciais do Google Cloud na pasta do projeto.")
+            st.stop()
+
+        credentials = Credentials.from_service_account_file(
+            ARQUIVO_CREDENCIAIS, scopes=SCOPES)
+        client = gspread.authorize(credentials)
+
+        # Abre a planilha
+        try:
+            sheet = client.open(NOME_PLANILHA).sheet1
+            return sheet
+        except gspread.SpreadsheetNotFound:
+            st.error(
+                f"Planilha '{NOME_PLANILHA}' não encontrada! Verifique se o nome está correto e se você compartilhou a planilha com o email da service account.")
+            st.stop()
+
+    except Exception as e:
+        st.error(f"Erro ao conectar no Google Sheets: {e}")
+        st.stop()
 
 
 def carregar_dados():
-    """Carrega os dados do CSV ou cria um DataFrame inicial se não existir."""
-    if os.path.exists(ARQUIVO_DADOS):
-        try:
-            return pd.read_csv(ARQUIVO_DADOS)
-        except:
-            return criar_dados_iniciais()
-    else:
-        return criar_dados_iniciais()
+    """Carrega os dados da Planilha do Google."""
+    sheet = conectar_google_sheets()
+    dados = sheet.get_all_records()
+
+    if not dados:
+        return criar_dados_iniciais(sheet)
+
+    df = pd.DataFrame(dados)
+    return df
 
 
-def criar_dados_iniciais():
-    """Cria dados fictícios para demonstração inicial."""
+def criar_dados_iniciais(sheet):
+    """Cria dados fictícios e salva na planilha se ela estiver vazia."""
     dados = {
         "id": [1, 2, 3, 4, 5],
         "titulo": ["Landing Page Vestibular", "Correção Menu Mobile", "API de Notas", "Otimização de SEO", "Migração de Servidor"],
-        "responsavel": ["Ana", "Carlos", "João", "Beatriz", "Carlos"],
+        "responsavel": ["Pedro", "Israel", "Vinícius", "Eduardo"],
         "status": ["Concluído", "Em Desenvolvimento", "Code Review/QA", "Backlog/A Fazer", "Backlog/A Fazer"],
         "tipo": ["Feature (Nova Funcionalidade)", "Bugfix (Correção)", "Feature (Nova Funcionalidade)", "Refatoração", "Infraestrutura"],
         "progresso": [100, 60, 90, 0, 10],
         "data_criacao": [datetime.now().strftime("%Y-%m-%d")] * 5
     }
     df = pd.DataFrame(dados)
-    salvar_dados(df)
+    salvar_dados(df)  # Salva no Sheets
     return df
 
 
 def salvar_dados(df):
-    """Salva o DataFrame no arquivo CSV."""
-    df.to_csv(ARQUIVO_DADOS, index=False)
+    """Salva o DataFrame na Planilha do Google (sobrescreve tudo)."""
+    sheet = conectar_google_sheets()
+    # Limpa a planilha atual e atualiza com os novos dados
+    sheet.clear()
+    # Prepara os dados: cabeçalho + linhas
+    # Converte tudo para string para evitar erros de serialização JSON do Google
+    dados_lista = [df.columns.values.tolist()] + df.astype(str).values.tolist()
+    sheet.update(dados_lista)
 
 
 # --- INICIALIZAÇÃO DO ESTADO ---
+# Cache simples para evitar recarregar o Sheets a cada clique (opcional, mas bom para performance)
 if 'df_tarefas' not in st.session_state:
     st.session_state.df_tarefas = carregar_dados()
 
 # --- BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
-    st.title("🎓 Educa Mais")
+    st.title("Educa Mais")
     st.caption("Gestão de Desenvolvimento Web")
+    st.success("Conectado ao Google Sheets")
 
     menu = st.radio(
         "Navegação",
@@ -77,7 +122,15 @@ if menu == "Dashboard":
     st.header("Dashboard de Produtividade")
     st.markdown("Visão geral do andamento dos projetos das faculdades.")
 
+    # Botão para forçar atualização dos dados do Sheets
+    if st.button("Atualizar Dados da Nuvem"):
+        st.session_state.df_tarefas = carregar_dados()
+        st.rerun()
+
     df = st.session_state.df_tarefas
+
+    # Converter colunas numéricas que podem ter vindo como texto do Sheets
+    df['progresso'] = pd.to_numeric(df['progresso'])
 
     # Métricas (KPIs)
     col1, col2, col3, col4 = st.columns(4)
@@ -128,6 +181,8 @@ elif menu == "Quadro Kanban":
     filtro_tipo = c_filter2.multiselect("Filtrar por Tipo", TIPOS_TAREFA)
 
     df_view = st.session_state.df_tarefas.copy()
+    # Garantir tipo numérico
+    df_view['progresso'] = pd.to_numeric(df_view['progresso'])
 
     if filtro_dev:
         df_view = df_view[df_view['responsavel'].isin(filtro_dev)]
@@ -140,10 +195,8 @@ elif menu == "Quadro Kanban":
     for idx, coluna_nome in enumerate(COLUNAS_KANBAN):
         with cols[idx]:
             st.subheader(coluna_nome)
-            # Estilização visual da coluna (apenas separador)
             st.markdown("---")
 
-            # Filtrar tarefas desta coluna
             tarefas_coluna = df_view[df_view['status'] == coluna_nome]
 
             for i, row in tarefas_coluna.iterrows():
@@ -151,7 +204,7 @@ elif menu == "Quadro Kanban":
                 with st.expander(f"{row['id']} - {row['titulo']} ({row['progresso']}%)", expanded=True):
                     st.caption(
                         f"👤 **{row['responsavel']}** | 🏷️ {row['tipo'].split()[0]}")
-                    st.progress(row['progresso'] / 100)
+                    st.progress(int(row['progresso']) / 100)
 
                     # Controles de Edição Rápida
                     novo_status = st.selectbox(
@@ -168,18 +221,20 @@ elif menu == "Quadro Kanban":
 
                     # Lógica de Atualização
                     if novo_status != row['status'] or novo_progresso != row['progresso']:
+                        # Atualiza no Session State
                         st.session_state.df_tarefas.loc[st.session_state.df_tarefas['id']
                                                         == row['id'], 'status'] = novo_status
                         st.session_state.df_tarefas.loc[st.session_state.df_tarefas['id']
                                                         == row['id'], 'progresso'] = novo_progresso
 
-                        # Regra de negócio simples: Se 100%, move para Concluído
                         if novo_progresso == 100 and novo_status != "Concluído":
                             st.session_state.df_tarefas.loc[st.session_state.df_tarefas['id']
                                                             == row['id'], 'status'] = "Concluído"
                             st.toast(f"Tarefa {row['id']} concluída!")
 
-                        salvar_dados(st.session_state.df_tarefas)
+                        # Salva no Google Sheets
+                        with st.spinner('Salvando no Google Sheets...'):
+                            salvar_dados(st.session_state.df_tarefas)
                         st.rerun()
 
 # --- PÁGINA: NOVA DEMANDA ---
@@ -203,10 +258,12 @@ elif menu == "Nova Demanda":
         submitted = st.form_submit_button("Cadastrar Demanda")
 
         if submitted and titulo:
-            novo_id = st.session_state.df_tarefas['id'].max(
-            ) + 1 if not st.session_state.df_tarefas.empty else 1
+            # Garante ID como inteiro
+            ids = pd.to_numeric(st.session_state.df_tarefas['id'])
+            novo_id = ids.max() + 1 if not st.session_state.df_tarefas.empty else 1
+
             nova_linha = {
-                "id": novo_id,
+                "id": int(novo_id),
                 "titulo": titulo,
                 "responsavel": responsavel,
                 "status": status_inicial,
@@ -215,35 +272,36 @@ elif menu == "Nova Demanda":
                 "data_criacao": datetime.now().strftime("%Y-%m-%d")
             }
 
-            # Adiciona ao DataFrame usando pd.concat
             st.session_state.df_tarefas = pd.concat(
                 [st.session_state.df_tarefas, pd.DataFrame([nova_linha])], ignore_index=True)
-            salvar_dados(st.session_state.df_tarefas)
-            st.success(f"Demanda '{titulo}' cadastrada com sucesso!")
+
+            with st.spinner('Salvando no Google Sheets...'):
+                salvar_dados(st.session_state.df_tarefas)
+            st.success(f"Demanda '{titulo}' salva na nuvem com sucesso!")
 
 # --- PÁGINA: CONFIGURAÇÕES ---
 elif menu == "Configurações":
     st.header("Configurações do Sistema")
 
-    st.subheader("Gerenciamento de Dados")
-    st.write("Os dados são salvos automaticamente em 'dados_educamais.csv'.")
+    st.subheader("Conexão Google Sheets")
+    st.info(f"Conectado à planilha: **{NOME_PLANILHA}**")
 
     col1, col2 = st.columns(2)
     with col1:
-        csv = st.session_state.df_tarefas.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Baixar Backup (CSV)",
-            data=csv,
-            file_name='backup_tarefas.csv',
-            mime='text/csv',
-        )
+        if st.button("Recarregar Dados da Nuvem"):
+            st.session_state.df_tarefas = carregar_dados()
+            st.success("Dados atualizados!")
+            st.rerun()
 
     with col2:
-        if st.button("Limpar/Resetar Banco de Dados"):
-            st.session_state.df_tarefas = criar_dados_iniciais()
+        st.write("Cuidado: Isso apaga tudo.")
+        if st.button("Resetar Planilha para Padrão"):
+            sheet = conectar_google_sheets()
+            criar_dados_iniciais(sheet)
+            st.session_state.df_tarefas = carregar_dados()
             st.rerun()
 
 # --- RODAPÉ ---
 st.sidebar.markdown("---")
 st.sidebar.caption("Desenvolvido por Felipe Toledo")
-st.sidebar.caption("v1.0 - ADS Project")
+st.sidebar.caption("Criado com Streamlit")
