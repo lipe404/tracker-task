@@ -30,9 +30,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
+
 # --- FUNÇÕES DE CONEXÃO COM GOOGLE SHEETS ---
-
-
 def conectar_google_sheets():
     """Estabelece conexão com o Google Sheets usando Service Account."""
     try:
