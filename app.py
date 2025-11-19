@@ -25,15 +25,22 @@ TIPOS_TAREFA = ["Feature (Nova Funcionalidade)",
                 "Bugfix (Correção)", "Refatoração", "Infraestrutura"]
 PRIORIDADES = ["🔴 Urgente", "🟡 Alta", "🟢 Média", "⚪ Baixa"]
 
+# ✅ NOVO: Definir estrutura obrigatória da planilha
+COLUNAS_OBRIGATORIAS = ['id', 'titulo', 'responsavel', 'status', 'tipo',
+                        'prioridade', 'data_entrega', 'progresso', 'data_criacao']
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
 
-# --- FUNÇÕES DE CONEXÃO COM GOOGLE SHEETS ---
+# --- CACHE DE CONEXÃO ---
+@st.cache_resource(ttl=3600)  # Cache por 1 hora
 def conectar_google_sheets():
-    """Estabelece conexão com o Google Sheets usando Service Account."""
+    """
+    Estabelece conexão com o Google Sheets usando Service Account.
+    """
     try:
         if "gcp_service_account" in st.secrets:
             creds_dict = st.secrets["gcp_service_account"]
@@ -71,20 +78,79 @@ def conectar_google_sheets():
         st.stop()
 
 
-def carregar_dados():
-    """Carrega os dados da Planilha do Google."""
-    sheet = conectar_google_sheets()
-    dados = sheet.get_all_records()
+# --- TRATAMENTO DE DADOS VAZIOS E VALIDAÇÃO ---
+def validar_estrutura_planilha(df):
+    """
+    Valida se o DataFrame possui todas as colunas obrigatórias.
+    Retorna (bool, lista_colunas_faltantes)
+    """
+    colunas_faltantes = [
+        col for col in COLUNAS_OBRIGATORIAS if col not in df.columns]
+    return len(colunas_faltantes) == 0, colunas_faltantes
 
-    if not dados:
+
+def carregar_dados():
+    """
+    Carrega os dados da Planilha do Google com validação robusta.
+    Detecta dados vazios, colunas faltantes e estrutura corrompida.
+    """
+    sheet = conectar_google_sheets()
+
+    try:
+        dados = sheet.get_all_records()
+    except Exception as e:
+        st.warning(
+            f"Erro ao ler planilha: {e}. Criando estrutura inicial...")
+        return criar_dados_iniciais(sheet)
+
+    # Caso 1: Planilha completamente vazia
+    if not dados or len(dados) == 0:
+        st.info("Planilha vazia detectada. Inicializando com dados padrão...")
         return criar_dados_iniciais(sheet)
 
     df = pd.DataFrame(dados)
+
+    # Caso 2: Planilha tem dados mas está com estrutura incorreta
+    estrutura_valida, colunas_faltantes = validar_estrutura_planilha(df)
+
+    if not estrutura_valida:
+        st.error(
+            f"Estrutura da planilha inválida! Colunas faltantes: {', '.join(colunas_faltantes)}")
+        st.warning("Recriando estrutura padrão...")
+        return criar_dados_iniciais(sheet)
+
+    # Caso 3: Validação de tipos de dados críticos
+    try:
+        # Garante que ID seja numérico
+        df['id'] = pd.to_numeric(df['id'], errors='coerce')
+        df = df.dropna(subset=['id'])  # Remove linhas com ID inválido
+
+        # Garante que progresso seja numérico
+        df['progresso'] = pd.to_numeric(
+            df['progresso'], errors='coerce').fillna(0)
+
+        # Garante que datas sejam válidas
+        df['data_entrega'] = pd.to_datetime(
+            df['data_entrega'], errors='coerce')
+        df['data_criacao'] = pd.to_datetime(
+            df['data_criacao'], errors='coerce')
+
+        # Remove linhas completamente inválidas
+        if df.empty:
+            st.warning("Dados corrompidos detectados. Reinicializando...")
+            return criar_dados_iniciais(sheet)
+
+    except Exception as e:
+        st.error(f"Erro na validação de dados: {e}")
+        return criar_dados_iniciais(sheet)
+
     return df
 
 
 def criar_dados_iniciais(sheet):
-    """Cria dados fictícios e salva na planilha se ela estiver vazia."""
+    """
+    Cria dados fictícios e salva na planilha se ela estiver vazia ou corrompida.
+    """
     dados = {
         "id": [1, 2, 3, 4, 5],
         "titulo": ["Landing Page Vestibular", "Correção Menu Mobile", "API de Notas", "Otimização de SEO", "Migração de Servidor"],
@@ -97,27 +163,115 @@ def criar_dados_iniciais(sheet):
         "data_criacao": [datetime.now().strftime("%Y-%m-%d")] * 5
     }
     df = pd.DataFrame(dados)
-    salvar_dados(df)
+    salvar_dados_completo(df)
+    st.success("Estrutura inicial criada com sucesso!")
     return df
 
 
-def salvar_dados(df):
-    """Salva o DataFrame na Planilha do Google (sobrescreve tudo)."""
+# --- SINCRONIZAÇÃO INCREMENTAL ---
+def atualizar_celula_especifica(task_id, campo, novo_valor):
+    """
+    Args:
+        task_id: ID da tarefa a ser atualizada
+        campo: Nome da coluna a ser modificada
+        novo_valor: Novo valor a ser inserido
+    """
+    try:
+        sheet = conectar_google_sheets()
+
+        # Busca a linha correspondente ao ID
+        cell_id = sheet.find(str(task_id))
+
+        if not cell_id:
+            st.error(f"Tarefa ID {task_id} não encontrada na planilha!")
+            return False
+
+        # Descobre qual coluna modificar
+        headers = sheet.row_values(1)  # Primeira linha = cabeçalhos
+
+        if campo not in headers:
+            st.error(f"Campo '{campo}' não existe na planilha!")
+            return False
+
+        col_index = headers.index(campo) + 1  # gspread usa índice 1-based
+        row_index = cell_id.row
+
+        # Atualiza apenas a célula específica
+        sheet.update_cell(row_index, col_index, str(novo_valor))
+
+        return True
+
+    except Exception as e:
+        st.error(f"Erro na atualização incremental: {e}")
+        return False
+
+
+def atualizar_multiplas_celulas(task_id, campos_valores):
+    """
+    Atualiza múltiplas células de uma mesma linha de forma eficiente.
+
+    Args:
+        task_id: ID da tarefa
+        campos_valores: Dicionário {campo: novo_valor}
+    """
+    try:
+        sheet = conectar_google_sheets()
+        cell_id = sheet.find(str(task_id))
+
+        if not cell_id:
+            return False
+
+        headers = sheet.row_values(1)
+        row_index = cell_id.row
+
+        # Prepara lista de atualizações em lote
+        updates = []
+        for campo, valor in campos_valores.items():
+            if campo in headers:
+                col_index = headers.index(campo) + 1
+                updates.append({
+                    'range': f'{gspread.utils.rowcol_to_a1(row_index, col_index)}',
+                    'values': [[str(valor)]]
+                })
+
+        # Executa todas as atualizações de uma vez (batch update)
+        if updates:
+            sheet.batch_update(updates)
+
+        return True
+
+    except Exception as e:
+        st.error(f"Erro na atualização em lote: {e}")
+        return False
+
+
+def salvar_dados_completo(df):
+    """
+    Salva o DataFrame COMPLETO na Planilha (operação pesada).
+    Use apenas quando necessário (criar planilha, reset, etc).
+    """
     sheet = conectar_google_sheets()
     sheet.clear()
     dados_lista = [df.columns.values.tolist()] + df.astype(str).values.tolist()
     sheet.update(dados_lista)
 
 
+# --- FUNÇÃO AUXILIAR PARA FORÇAR LIMPEZA DE CACHE ---
+def limpar_cache_conexao():
+    """Força recarregamento da conexão (útil após erros ou updates)"""
+    conectar_google_sheets.clear()
+    st.cache_data.clear()
+
+
 # --- INICIALIZAÇÃO DO ESTADO ---
 if 'df_tarefas' not in st.session_state:
-    st.session_state.df_tarefas = carregar_dados()
+    with st.spinner('Carregando dados da nuvem...'):
+        st.session_state.df_tarefas = carregar_dados()
 
 # --- BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
-    st.title("Educa Mais")
-    st.caption("Gestão de Desenvolvimento Web")
-    st.success("Conectado ao Google Sheets")
+    st.title("Tracker Tasks")
+    st.caption("Gestão de Demandas de Desenvolvimento")
 
     menu = st.radio(
         "Navegação",
@@ -125,20 +279,23 @@ with st.sidebar:
     )
 
     st.divider()
-    st.info(f"Equipe: {len(DESENVOLVEDORES)} Desenvolvedores")
+    st.info(f"👥 Equipe: {len(DESENVOLVEDORES)} Desenvolvedores")
 
 # --- PÁGINA: DASHBOARD ---
 if menu == "Dashboard":
     st.header("Dashboard de Produtividade")
-    st.markdown("Visão geral do andamento dos projetos das faculdades.")
+    st.markdown("Visão geral do andamento dos projetos.")
 
-    if st.button("Atualizar Dados da Nuvem"):
-        st.session_state.df_tarefas = carregar_dados()
-        st.rerun()
+    col_btn1, col_btn2 = st.columns([1, 3])
+    with col_btn1:
+        if st.button("🔄 Atualizar", use_container_width=True):
+            with st.spinner('Carregando...'):
+                st.session_state.df_tarefas = carregar_dados()
+            st.rerun()
 
     df = st.session_state.df_tarefas.copy()
-    df['progresso'] = pd.to_numeric(df['progresso'])
-    df['data_entrega'] = pd.to_datetime(df['data_entrega'])
+    df['progresso'] = pd.to_numeric(df['progresso'], errors='coerce').fillna(0)
+    df['data_entrega'] = pd.to_datetime(df['data_entrega'], errors='coerce')
 
     # Métricas (KPIs)
     col1, col2, col3, col4 = st.columns(4)
@@ -152,7 +309,7 @@ if menu == "Dashboard":
     col2.metric("Taxa de Conclusão",
                 f"{(concluidas/total*100):.1f}%" if total > 0 else "0%")
     col3.metric("Em Andamento", em_andamento)
-    col4.metric("Atrasadas", atrasadas,
+    col4.metric("⚠️ Atrasadas", atrasadas,
                 delta=f"-{atrasadas}" if atrasadas > 0 else "0", delta_color="inverse")
 
     st.divider()
@@ -161,7 +318,7 @@ if menu == "Dashboard":
     col_urgentes, col_prazo = st.columns(2)
 
     with col_urgentes:
-        st.subheader("Tarefas de Alta Prioridade")
+        st.subheader("🚨 Tarefas de Alta Prioridade")
         df_urgentes = df[df['prioridade'].isin(
             ['🔴 Urgente', '🟡 Alta']) & (df['status'] != 'Concluído')]
         if not df_urgentes.empty:
@@ -172,10 +329,10 @@ if menu == "Dashboard":
                 hide_index=True
             )
         else:
-            st.success("Nenhuma tarefa urgente no momento!")
+            st.success("✅ Nenhuma tarefa urgente no momento!")
 
     with col_prazo:
-        st.subheader("Próximas Entregas (15 dias)")
+        st.subheader("📅 Próximas Entregas (15 dias)")
         hoje = datetime.now()
         df_proximas = df[
             (df['data_entrega'] >= hoje) &
@@ -199,7 +356,7 @@ if menu == "Dashboard":
     c1, c2 = st.columns(2)
 
     with c1:
-        st.subheader("Demandas por Desenvolvedor")
+        st.subheader("👨🏻‍💻 Demandas por Desenvolvedor")
         if not df.empty:
             fig_dev = px.bar(
                 df,
@@ -211,7 +368,7 @@ if menu == "Dashboard":
             st.plotly_chart(fig_dev, use_container_width=True)
 
     with c2:
-        st.subheader("Distribuição por Tipo")
+        st.subheader("🏷️ Distribuição por Tipo")
         if not df.empty:
             fig_type = px.pie(
                 df,
@@ -243,8 +400,10 @@ elif menu == "Quadro Kanban":
         "Filtrar por Prioridade", PRIORIDADES)
 
     df_view = st.session_state.df_tarefas.copy()
-    df_view['progresso'] = pd.to_numeric(df_view['progresso'])
-    df_view['data_entrega'] = pd.to_datetime(df_view['data_entrega'])
+    df_view['progresso'] = pd.to_numeric(
+        df_view['progresso'], errors='coerce').fillna(0)
+    df_view['data_entrega'] = pd.to_datetime(
+        df_view['data_entrega'], errors='coerce')
 
     if filtro_dev:
         df_view = df_view[df_view['responsavel'].isin(filtro_dev)]
@@ -273,7 +432,7 @@ elif menu == "Quadro Kanban":
                 # Card da Tarefa
                 with st.expander(f"#{row['id']} {row['prioridade']} - {row['titulo']}", expanded=True):
                     col_info1, col_info2 = st.columns(2)
-                    col_info1.caption(f"👤 **{row['responsavel']}**")
+                    col_info1.caption(f"👨🏻‍💻 **{row['responsavel']}**")
                     col_info2.caption(f"🏷️ {row['tipo'].split()[0]}")
 
                     # Exibir prazo com destaque visual
@@ -294,20 +453,37 @@ elif menu == "Quadro Kanban":
                         key=f"prog_{row['id']}"
                     )
 
-                    # Lógica de Atualização
+                    # Atualização Incremental
                     if novo_status != row['status'] or novo_progresso != row['progresso']:
-                        st.session_state.df_tarefas.loc[st.session_state.df_tarefas['id']
-                                                        == row['id'], 'status'] = novo_status
-                        st.session_state.df_tarefas.loc[st.session_state.df_tarefas['id']
-                                                        == row['id'], 'progresso'] = novo_progresso
+                        # Atualiza no Session State
+                        st.session_state.df_tarefas.loc[
+                            st.session_state.df_tarefas['id'] == row['id'], 'status'
+                        ] = novo_status
+                        st.session_state.df_tarefas.loc[
+                            st.session_state.df_tarefas['id'] == row['id'], 'progresso'
+                        ] = novo_progresso
 
+                        # Auto-completar se progresso = 100%
                         if novo_progresso == 100 and novo_status != "Concluído":
-                            st.session_state.df_tarefas.loc[st.session_state.df_tarefas['id']
-                                                            == row['id'], 'status'] = "Concluído"
-                            st.toast(f"Tarefa #{row['id']} concluída!")
+                            novo_status = "Concluído"
+                            st.session_state.df_tarefas.loc[
+                                st.session_state.df_tarefas['id'] == row['id'], 'status'
+                            ] = "Concluído"
+                            st.toast(f"✅ Tarefa #{row['id']} concluída!")
 
-                        with st.spinner('Salvando no Google Sheets...'):
-                            salvar_dados(st.session_state.df_tarefas)
+                        # Atualização incremental (rápida)
+                        with st.spinner('Salvando...'):
+                            sucesso = atualizar_multiplas_celulas(
+                                row['id'],
+                                {'status': novo_status, 'progresso': novo_progresso}
+                            )
+
+                            if not sucesso:
+                                st.warning(
+                                    "Falha na atualização rápida. Tentando salvar tudo...")
+                                salvar_dados_completo(
+                                    st.session_state.df_tarefas)
+
                         st.rerun()
 
 # --- PÁGINA: NOVA DEMANDA ---
@@ -336,31 +512,43 @@ elif menu == "Nova Demanda":
         descricao = st.text_area(
             "Descrição Detalhada", placeholder="Descreva os requisitos técnicos...")
 
-        submitted = st.form_submit_button("Cadastrar Demanda")
+        submitted = st.form_submit_button(
+            "Cadastrar Demanda", use_container_width=True)
 
         if submitted and titulo:
-            ids = pd.to_numeric(st.session_state.df_tarefas['id'])
-            novo_id = ids.max() + 1 if not st.session_state.df_tarefas.empty else 1
+            try:
+                ids = pd.to_numeric(
+                    st.session_state.df_tarefas['id'], errors='coerce')
+                novo_id = int(
+                    ids.max() + 1) if not st.session_state.df_tarefas.empty else 1
 
-            nova_linha = {
-                "id": int(novo_id),
-                "titulo": titulo,
-                "responsavel": responsavel,
-                "status": status_inicial,
-                "tipo": tipo,
-                "prioridade": prioridade,
-                "data_entrega": data_entrega.strftime("%Y-%m-%d"),
-                "progresso": 0,
-                "data_criacao": datetime.now().strftime("%Y-%m-%d")
-            }
+                nova_linha = {
+                    "id": novo_id,
+                    "titulo": titulo,
+                    "responsavel": responsavel,
+                    "status": status_inicial,
+                    "tipo": tipo,
+                    "prioridade": prioridade,
+                    "data_entrega": data_entrega.strftime("%Y-%m-%d"),
+                    "progresso": 0,
+                    "data_criacao": datetime.now().strftime("%Y-%m-%d")
+                }
 
-            st.session_state.df_tarefas = pd.concat(
-                [st.session_state.df_tarefas, pd.DataFrame([nova_linha])], ignore_index=True)
+                # Adiciona ao DataFrame local
+                st.session_state.df_tarefas = pd.concat(
+                    [st.session_state.df_tarefas, pd.DataFrame([nova_linha])],
+                    ignore_index=True
+                )
 
-            with st.spinner('Salvando no Google Sheets...'):
-                salvar_dados(st.session_state.df_tarefas)
-            st.success(f"Demanda '{titulo}' salva na nuvem com sucesso!")
-            st.balloons()
+                # Salva no Google Sheets (necessário salvar completo para nova linha)
+                with st.spinner('Salvando no Google Sheets...'):
+                    salvar_dados_completo(st.session_state.df_tarefas)
+
+                st.success(f"Demanda '{titulo}' salva na nuvem com sucesso!")
+                st.balloons()
+
+            except Exception as e:
+                st.error(f"Erro ao cadastrar demanda: {e}")
 
 # --- PÁGINA: CONFIGURAÇÕES ---
 elif menu == "Configurações":
@@ -369,16 +557,24 @@ elif menu == "Configurações":
     st.subheader("Conexão Google Sheets")
     st.info(f"Conectado à planilha: **{NOME_PLANILHA}**")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
+
     with col1:
-        if st.button("Recarregar Dados da Nuvem"):
-            st.session_state.df_tarefas = carregar_dados()
+        if st.button("Recarregar Dados", use_container_width=True):
+            with st.spinner('Carregando...'):
+                st.session_state.df_tarefas = carregar_dados()
             st.success("Dados atualizados!")
             st.rerun()
 
     with col2:
-        st.warning("Cuidado: Isso apaga tudo.")
-        if st.button("Resetar Planilha para Padrão"):
+        if st.button("Limpar Cache", use_container_width=True):
+            limpar_cache_conexao()
+            st.success("Cache limpo!")
+            st.rerun()
+
+    with col3:
+        st.warning("⚠️ Cuidado: Apaga tudo")
+        if st.button("🔥 Resetar Planilha", use_container_width=True):
             sheet = conectar_google_sheets()
             criar_dados_iniciais(sheet)
             st.session_state.df_tarefas = carregar_dados()
@@ -389,13 +585,33 @@ elif menu == "Configurações":
 
     st.subheader("Estatísticas do Sistema")
     df = st.session_state.df_tarefas
-    col_stats1, col_stats2, col_stats3 = st.columns(3)
+    col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
 
-    col_stats1.metric("Total de Tarefas Cadastradas", len(df))
+    col_stats1.metric("Total de Tarefas", len(df))
     col_stats2.metric("Desenvolvedores Ativos", df['responsavel'].nunique())
     col_stats3.metric("Tipos de Demanda", df['tipo'].nunique())
+    col_stats4.metric("Estrutura Validada",
+                      "OK" if validar_estrutura_planilha(df)[0] else "Erro")
+
+    st.divider()
+
+    # Diagnóstico da planilha
+    st.subheader("Diagnóstico da Planilha")
+
+    with st.expander("Ver Detalhes Técnicos"):
+        st.write("**Colunas Presentes:**")
+        st.code(", ".join(df.columns.tolist()))
+
+        st.write("**Colunas Obrigatórias:**")
+        st.code(", ".join(COLUNAS_OBRIGATORIAS))
+
+        estrutura_ok, faltantes = validar_estrutura_planilha(df)
+        if estrutura_ok:
+            st.success("Estrutura da planilha está correta!")
+        else:
+            st.error(f"Colunas faltantes: {', '.join(faltantes)}")
 
 # --- RODAPÉ ---
 st.sidebar.markdown("---")
-st.sidebar.caption("Desenvolvido por Felipe Toledo")
+st.sidebar.caption("Desenvolvido por Toledo")
 st.sidebar.caption("Criado com Streamlit + Google Sheets")
