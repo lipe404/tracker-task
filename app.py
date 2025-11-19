@@ -15,7 +15,6 @@ st.set_page_config(
 )
 
 # --- CONSTANTES E SETUP ---
-# Nome da planilha exato como está no seu Google Drive
 NOME_PLANILHA = "Tasks Devs"
 ARQUIVO_CREDENCIAIS = "credentials.json"
 
@@ -37,22 +36,42 @@ SCOPES = [
 def conectar_google_sheets():
     """Estabelece conexão com o Google Sheets usando Service Account."""
     try:
-        if not os.path.exists(ARQUIVO_CREDENCIAIS):
-            st.error("Arquivo 'credentials.json' não encontrado! Por favor, adicione o arquivo de credenciais do Google Cloud na pasta do projeto.")
+        # 1. Tenta carregar dos Secrets do Streamlit (Para Deploy na Nuvem)
+        if "gcp_service_account" in st.secrets:
+            creds_dict = st.secrets["gcp_service_account"]
+            credentials = Credentials.from_service_account_info(
+                creds_dict, scopes=SCOPES)
+
+        # 2. Fallback: Tenta carregar do arquivo local (Para rodar no PC)
+        elif os.path.exists(ARQUIVO_CREDENCIAIS):
+            credentials = Credentials.from_service_account_file(
+                ARQUIVO_CREDENCIAIS, scopes=SCOPES)
+
+        else:
+            st.error(
+                "Nenhuma credencial encontrada! Configure os Secrets (na nuvem) ou adicione 'credentials.json' (local).")
             st.stop()
 
-        credentials = Credentials.from_service_account_file(
-            ARQUIVO_CREDENCIAIS, scopes=SCOPES)
         client = gspread.authorize(credentials)
 
-        # Abre a planilha
+        # Tenta abrir a planilha
         try:
+            # O método .open() exige que a GOOGLE DRIVE API esteja ativada no console
             sheet = client.open(NOME_PLANILHA).sheet1
             return sheet
         except gspread.SpreadsheetNotFound:
             st.error(
-                f"Planilha '{NOME_PLANILHA}' não encontrada! Verifique se o nome está correto e se você compartilhou a planilha com o email da service account.")
+                f"Planilha '{NOME_PLANILHA}' não encontrada! Verifique se o nome está exato e se compartilhou com o email da service account.")
             st.stop()
+        except gspread.exceptions.APIError as e:
+            if "Google Drive API has not been used" in str(e):
+                st.error(
+                    "ERRO DE API: A 'Google Drive API' não está ativada no seu projeto do Google Cloud.")
+                st.markdown(
+                    "[Clique aqui para ativar a Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)")
+                st.stop()
+            else:
+                raise e
 
     except Exception as e:
         st.error(f"Erro ao conectar no Google Sheets: {e}")
