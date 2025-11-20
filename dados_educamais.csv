@@ -1,6 +1,0 @@
-id,titulo,responsavel,status,tipo,progresso,data_criacao
-1,Landing Page Vestibular,Ana,Concluído,Feature (Nova Funcionalidade),100,2025-11-19
-2,Correção Menu Mobile,Carlos,Em Desenvolvimento,Bugfix (Correção),60,2025-11-19
-3,API de Notas,João,Code Review/QA,Feature (Nova Funcionalidade),70,2025-11-19
-4,Otimização de SEO,Beatriz,Backlog/A Fazer,Refatoração,0,2025-11-19
-5,Migração de Servidor,Carlos,Backlog/A Fazer,Infraestrutura,10,2025-11-19
