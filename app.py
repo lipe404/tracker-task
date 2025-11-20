@@ -584,6 +584,23 @@ if menu == "Dashboard":
 # --- PÁGINA: KANBAN ---
 elif menu == "Quadro Kanban":
     st.header("Quadro Kanban")
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stHorizontalBlock"] { gap: 1rem; }
+        div[data-testid="column"] { position: relative; }
+        div[data-testid="column"]>div { position: relative; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; min-height: 75vh; }
+        div[data-testid="column"]>div::after { content: ""; position: absolute; top: 0; right: -8px; width: 2px; height: 100%; background: #d1d5db; }
+        div[data-testid="column"]:last-child>div::after { display: none; }
+        .kanban-header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; background: #ffffffd9; border: 1px solid #e5e7eb; border-left: 6px solid var(--accent, #6b7280); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; backdrop-filter: blur(4px); }
+        .kanban-title { font-weight: 600; }
+        .kanban-count { font-size: 12px; background: #0000000a; padding: 4px 8px; border-radius: 999px; }
+        .kanban-empty { border: 1px dashed #cbd5e1; background: #ffffff; color: #64748b; border-radius: 8px; padding: 10px; text-align: center; }
+        .st-expander { border: 1px solid #e5e7eb; border-radius: 10px; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # Filtros
     c_filter1, c_filter2, c_filter3 = st.columns(3)
@@ -608,14 +625,27 @@ elif menu == "Quadro Kanban":
 
     # Layout das Colunas do Kanban
     cols = st.columns(len(COLUNAS_KANBAN))
+    cores = {
+        "Backlog/A Fazer": "#EAB308",
+        "Em Desenvolvimento": "#3B82F6",
+        "Code Review/QA": "#EC4899",
+        "Concluído": "#22C55E",
+    }
 
     for idx, coluna_nome in enumerate(COLUNAS_KANBAN):
         with cols[idx]:
-            st.subheader(coluna_nome)
-            st.markdown("---")
-
             tarefas_coluna = df_view[df_view['status']
                                      == coluna_nome].sort_values('data_entrega')
+            accent = cores.get(coluna_nome, "#6B7280")
+            st.markdown(
+                f"<div class='kanban-header' style='--accent:{accent}'><span class='kanban-title'>{coluna_nome}</span><span class='kanban-count'>{len(tarefas_coluna)} tarefas</span></div>",
+                unsafe_allow_html=True,
+            )
+            if tarefas_coluna.empty:
+                st.markdown("<div class='kanban-empty'>Nenhuma tarefa nesta coluna</div>", unsafe_allow_html=True)
+            else:
+                media_prog = int(pd.to_numeric(tarefas_coluna['progresso'], errors='coerce').fillna(0).mean())
+                st.progress(media_prog / 100)
 
             for i, row in tarefas_coluna.iterrows():
                 # Calcular status do prazo
