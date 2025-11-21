@@ -3,3 +3,4 @@ credentials.json
 todo.md
 .streamlit/secrets.toml
 analise.md
+.env.example
