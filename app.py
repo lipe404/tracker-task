@@ -19,6 +19,7 @@ st.set_page_config(
 # --- CONSTANTES E SETUP ---
 NOME_PLANILHA = "Tasks Devs"
 ARQUIVO_CREDENCIAIS = "credentials.json"
+NOME_ABA_LOGS = "Logs"
 
 COLUNAS_KANBAN = ["Backlog/A Fazer",
                   "Em Desenvolvimento", "Code Review/QA", "Concluído"]
@@ -34,6 +35,48 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
+
+def obter_spreadsheet():
+    sheet = conectar_google_sheets()
+    return sheet.spreadsheet
+
+def obter_worksheet_logs():
+    ss = obter_spreadsheet()
+    try:
+        ws = ss.worksheet(NOME_ABA_LOGS)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = ss.add_worksheet(title=NOME_ABA_LOGS, rows=1, cols=7)
+        ws.update([[
+            "timestamp",
+            "acao",
+            "task_id",
+            "campo",
+            "valor_antigo",
+            "valor_novo",
+            "usuario"
+        ]])
+    return ws
+
+def obter_usuario_atual():
+    try:
+        return st.secrets.get("usuario", os.environ.get("USERNAME") or os.environ.get("USER") or "Desconhecido")
+    except Exception:
+        return "Desconhecido"
+
+def registrar_logs(acao, task_id, alteracoes, usuario=None):
+    ws = obter_worksheet_logs()
+    if usuario is None:
+        usuario = obter_usuario_atual()
+    linhas = []
+    ts = datetime.now().isoformat()
+    for campo, par in alteracoes.items():
+        antigo, novo = par
+        linhas.append([ts, acao, str(task_id), campo, str(antigo) if antigo is not None else "", str(novo) if novo is not None else "", usuario])
+    try:
+        ws.append_rows(linhas, value_input_option="USER_ENTERED")
+    except Exception:
+        for linha in linhas:
+            ws.append_row(linha, value_input_option="USER_ENTERED")
 
 
 # --- CACHE DE CONEXÃO ---
@@ -198,9 +241,9 @@ def atualizar_celula_especifica(task_id, campo, novo_valor):
         col_index = headers.index(campo) + 1  # gspread usa índice 1-based
         row_index = cell_id.row
 
-        # Atualiza apenas a célula específica
+        valor_antigo = sheet.cell(row_index, col_index).value
         sheet.update_cell(row_index, col_index, str(novo_valor))
-
+        registrar_logs("atualizacao", task_id, {campo: (valor_antigo, novo_valor)})
         return True
 
     except Exception as e:
@@ -225,6 +268,11 @@ def atualizar_multiplas_celulas(task_id, campos_valores):
 
         headers = sheet.row_values(1)
         row_index = cell_id.row
+        linha_atual = sheet.row_values(row_index)
+        mapa_antigo = {}
+        for i, h in enumerate(headers):
+            v = linha_atual[i] if i < len(linha_atual) else ""
+            mapa_antigo[h] = v
 
         # Prepara lista de atualizações em lote
         updates = []
@@ -239,7 +287,12 @@ def atualizar_multiplas_celulas(task_id, campos_valores):
         # Executa todas as atualizações de uma vez (batch update)
         if updates:
             sheet.batch_update(updates)
-
+        alteracoes = {}
+        for campo, valor in campos_valores.items():
+            if campo in headers:
+                alteracoes[campo] = (mapa_antigo.get(campo), valor)
+        if alteracoes:
+            registrar_logs("atualizacao", task_id, alteracoes)
         return True
 
     except Exception as e:
@@ -375,6 +428,7 @@ def adicionar_tarefa_incremental_com_validacao(nova_tarefa_dict, validar_pos_ins
 
         # Adiciona a linha no final da planilha
         sheet.append_row(nova_linha, value_input_option='USER_ENTERED')
+        registrar_logs("criacao", nova_tarefa_dict.get('id'), {k: (None, nova_tarefa_dict.get(k)) for k in headers})
 
         # VALIDAÇÃO PÓS-INSERÇÃO (Opcional mas recomendado)
         if validar_pos_insercao:
@@ -432,6 +486,7 @@ def adicionar_tarefa_com_fallback(nova_tarefa_dict):
         salvar_dados_completo(st.session_state.df_tarefas)
 
         st.success("Tarefa adicionada com sucesso (modo completo)!")
+        registrar_logs("criacao", nova_tarefa_dict.get('id'), {k: (None, nova_tarefa_dict.get(k)) for k in st.session_state.df_tarefas.columns})
         return True
 
     except Exception as e:
@@ -469,7 +524,7 @@ with st.sidebar:
 
     menu = st.radio(
         "Navegação",
-        ["Dashboard", "Quadro Kanban", "Nova Demanda", "Configurações"]
+        ["Dashboard", "Quadro Kanban", "Nova Demanda", "Histórico", "Configurações"]
     )
 
     st.divider()
@@ -879,6 +934,44 @@ elif menu == "Nova Demanda":
         int(pd.to_numeric(df_stats['id'], errors='coerce').max(
         ) + 1) if not df_stats.empty else 1
     )
+
+elif menu == "Histórico":
+    st.header("Histórico de Alterações")
+    try:
+        ws = obter_worksheet_logs()
+        registros = ws.get_all_records()
+    except Exception as e:
+        st.error(f"Erro ao carregar logs: {e}")
+        registros = []
+    if not registros:
+        st.info("Nenhum log registrado.")
+    else:
+        df_logs = pd.DataFrame(registros)
+        if 'timestamp' in df_logs.columns:
+            try:
+                df_logs['timestamp'] = pd.to_datetime(df_logs['timestamp'], errors='coerce')
+            except Exception:
+                pass
+        colf1, colf2, colf3, colf4 = st.columns(4)
+        filtro_id = colf1.text_input("Filtrar por ID", "")
+        filtro_acao = colf2.multiselect("Ações", sorted(df_logs['acao'].dropna().unique().tolist()))
+        filtro_usuario = colf3.multiselect("Usuário", sorted(df_logs['usuario'].dropna().unique().tolist()))
+        filtro_campo = colf4.multiselect("Campo", sorted(df_logs['campo'].dropna().unique().tolist()))
+        if filtro_id.strip():
+            df_logs = df_logs[df_logs['task_id'].astype(str) == filtro_id.strip()]
+        if filtro_acao:
+            df_logs = df_logs[df_logs['acao'].isin(filtro_acao)]
+        if filtro_usuario:
+            df_logs = df_logs[df_logs['usuario'].isin(filtro_usuario)]
+        if filtro_campo:
+            df_logs = df_logs[df_logs['campo'].isin(filtro_campo)]
+        if 'timestamp' in df_logs.columns:
+            df_logs = df_logs.sort_values('timestamp', ascending=False)
+        st.dataframe(
+            df_logs[[c for c in ['timestamp','acao','task_id','campo','valor_antigo','valor_novo','usuario'] if c in df_logs.columns]],
+            use_container_width=True,
+            hide_index=True
+        )
 
 # --- PÁGINA: CONFIGURAÇÕES ---
 elif menu == "Configurações":
