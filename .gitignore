@@ -1,5 +1,6 @@
 .env
 credentials.json
-todo.md
 .streamlit/secrets.toml
 analise.md
+contexto.md
+todo.md

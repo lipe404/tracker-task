@@ -13,7 +13,7 @@ st.set_page_config(
     page_title="Educa Mais - Gestão de Tech",
     page_icon="🎓",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # --- CONSTANTES E SETUP ---
@@ -21,24 +21,44 @@ NOME_PLANILHA = "Tasks Devs"
 ARQUIVO_CREDENCIAIS = "credentials.json"
 NOME_ABA_LOGS = "Logs"
 
-COLUNAS_KANBAN = ["Backlog/A Fazer",
-                  "Em Desenvolvimento", "Code Review/QA", "Concluído"]
+COLUNAS_KANBAN = [
+    "Backlog/A Fazer",
+    "Em Desenvolvimento",
+    "Code Review/QA",
+    "Concluído",
+]
 DESENVOLVEDORES = ["Eduardo", "Israel", "Pedro", "Vinícius"]
-TIPOS_TAREFA = ["Feature (Nova Funcionalidade)",
-                "Bugfix (Correção)", "Refatoração", "Infraestrutura"]
+TIPOS_TAREFA = [
+    "Feature (Nova Funcionalidade)",
+    "Bugfix (Correção)",
+    "Refatoração",
+    "Infraestrutura",
+]
 PRIORIDADES = ["🔴 Urgente", "🟡 Alta", "🟢 Média", "⚪ Baixa"]
 
-COLUNAS_OBRIGATORIAS = ['id', 'titulo', 'descricao', 'responsavel', 'status', 'tipo',
-                        'prioridade', 'data_entrega', 'progresso', 'data_criacao']
+COLUNAS_OBRIGATORIAS = [
+    "id",
+    "titulo",
+    "descricao",
+    "responsavel",
+    "status",
+    "tipo",
+    "prioridade",
+    "data_entrega",
+    "progresso",
+    "data_criacao",
+]
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive",
 ]
+
 
 def obter_spreadsheet():
     sheet = conectar_google_sheets()
     return sheet.spreadsheet
+
 
 def obter_worksheet_logs():
     ss = obter_spreadsheet()
@@ -46,22 +66,31 @@ def obter_worksheet_logs():
         ws = ss.worksheet(NOME_ABA_LOGS)
     except gspread.exceptions.WorksheetNotFound:
         ws = ss.add_worksheet(title=NOME_ABA_LOGS, rows=1, cols=7)
-        ws.update([[
-            "timestamp",
-            "acao",
-            "task_id",
-            "campo",
-            "valor_antigo",
-            "valor_novo",
-            "usuario"
-        ]])
+        ws.update(
+            [
+                [
+                    "timestamp",
+                    "acao",
+                    "task_id",
+                    "campo",
+                    "valor_antigo",
+                    "valor_novo",
+                    "usuario",
+                ]
+            ]
+        )
     return ws
+
 
 def obter_usuario_atual():
     try:
-        return st.secrets.get("usuario", os.environ.get("USERNAME") or os.environ.get("USER") or "Desconhecido")
+        return st.secrets.get(
+            "usuario",
+            os.environ.get("USERNAME") or os.environ.get("USER") or "Desconhecido",
+        )
     except Exception:
         return "Desconhecido"
+
 
 def registrar_logs(acao, task_id, alteracoes, usuario=None):
     ws = obter_worksheet_logs()
@@ -71,7 +100,17 @@ def registrar_logs(acao, task_id, alteracoes, usuario=None):
     ts = datetime.now().isoformat()
     for campo, par in alteracoes.items():
         antigo, novo = par
-        linhas.append([ts, acao, str(task_id), campo, str(antigo) if antigo is not None else "", str(novo) if novo is not None else "", usuario])
+        linhas.append(
+            [
+                ts,
+                acao,
+                str(task_id),
+                campo,
+                str(antigo) if antigo is not None else "",
+                str(novo) if novo is not None else "",
+                usuario,
+            ]
+        )
     try:
         ws.append_rows(linhas, value_input_option="USER_ENTERED")
     except Exception:
@@ -89,13 +128,16 @@ def conectar_google_sheets():
         if "gcp_service_account" in st.secrets:
             creds_dict = st.secrets["gcp_service_account"]
             credentials = Credentials.from_service_account_info(
-                creds_dict, scopes=SCOPES)
+                creds_dict, scopes=SCOPES
+            )
         elif os.path.exists(ARQUIVO_CREDENCIAIS):
             credentials = Credentials.from_service_account_file(
-                ARQUIVO_CREDENCIAIS, scopes=SCOPES)
+                ARQUIVO_CREDENCIAIS, scopes=SCOPES
+            )
         else:
             st.error(
-                "Nenhuma credencial encontrada! Configure os Secrets (na nuvem) ou adicione 'credentials.json' (local).")
+                "Nenhuma credencial encontrada! Configure os Secrets (na nuvem) ou adicione 'credentials.json' (local)."
+            )
             st.stop()
 
         client = gspread.authorize(credentials)
@@ -105,14 +147,17 @@ def conectar_google_sheets():
             return sheet
         except gspread.SpreadsheetNotFound:
             st.error(
-                f"Planilha '{NOME_PLANILHA}' não encontrada! Verifique se o nome está exato e se compartilhou com o email da service account.")
+                f"Planilha '{NOME_PLANILHA}' não encontrada! Verifique se o nome está exato e se compartilhou com o email da service account."
+            )
             st.stop()
         except gspread.exceptions.APIError as e:
             if "Google Drive API has not been used" in str(e):
                 st.error(
-                    "ERRO DE API: A 'Google Drive API' não está ativada no seu projeto do Google Cloud.")
+                    "ERRO DE API: A 'Google Drive API' não está ativada no seu projeto do Google Cloud."
+                )
                 st.markdown(
-                    "[Clique aqui para ativar a Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)")
+                    "[Clique aqui para ativar a Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)"
+                )
                 st.stop()
             else:
                 raise e
@@ -128,8 +173,7 @@ def validar_estrutura_planilha(df):
     Valida se o DataFrame possui todas as colunas obrigatórias.
     Retorna (bool, lista_colunas_faltantes)
     """
-    colunas_faltantes = [
-        col for col in COLUNAS_OBRIGATORIAS if col not in df.columns]
+    colunas_faltantes = [col for col in COLUNAS_OBRIGATORIAS if col not in df.columns]
     return len(colunas_faltantes) == 0, colunas_faltantes
 
 
@@ -143,8 +187,7 @@ def carregar_dados():
     try:
         dados = sheet.get_all_records()
     except Exception as e:
-        st.warning(
-            f"Erro ao ler planilha: {e}. Criando estrutura inicial...")
+        st.warning(f"Erro ao ler planilha: {e}. Criando estrutura inicial...")
         return criar_dados_iniciais(sheet)
 
     # Caso 1: Planilha completamente vazia
@@ -159,25 +202,23 @@ def carregar_dados():
 
     if not estrutura_valida:
         st.error(
-            f"Estrutura da planilha inválida! Colunas faltantes: {', '.join(colunas_faltantes)}")
+            f"Estrutura da planilha inválida! Colunas faltantes: {', '.join(colunas_faltantes)}"
+        )
         st.warning("Recriando estrutura padrão...")
         return criar_dados_iniciais(sheet)
 
     # Caso 3: Validação de tipos de dados críticos
     try:
         # Garante que ID seja numérico
-        df['id'] = pd.to_numeric(df['id'], errors='coerce')
-        df = df.dropna(subset=['id'])  # Remove linhas com ID inválido
+        df["id"] = pd.to_numeric(df["id"], errors="coerce")
+        df = df.dropna(subset=["id"])  # Remove linhas com ID inválido
 
         # Garante que progresso seja numérico
-        df['progresso'] = pd.to_numeric(
-            df['progresso'], errors='coerce').fillna(0)
+        df["progresso"] = pd.to_numeric(df["progresso"], errors="coerce").fillna(0)
 
         # Garante que datas sejam válidas
-        df['data_entrega'] = pd.to_datetime(
-            df['data_entrega'], errors='coerce')
-        df['data_criacao'] = pd.to_datetime(
-            df['data_criacao'], errors='coerce')
+        df["data_entrega"] = pd.to_datetime(df["data_entrega"], errors="coerce")
+        df["data_criacao"] = pd.to_datetime(df["data_criacao"], errors="coerce")
 
         # Remove linhas completamente inválidas
         if df.empty:
@@ -197,15 +238,45 @@ def criar_dados_iniciais(sheet):
     """
     dados = {
         "id": [1, 2, 3, 4, 5],
-        "titulo": ["Landing Page Vestibular", "Correção Menu Mobile", "API de Notas", "Otimização de SEO", "Migração de Servidor"],
-        "descricao": ["Criar página responsiva para captação de alunos", "Ajustar menu collapse no mobile", "Desenvolver API REST para consulta de notas", "Melhorar ranqueamento no Google", "Migrar para servidor AWS"],
+        "titulo": [
+            "Landing Page Vestibular",
+            "Correção Menu Mobile",
+            "API de Notas",
+            "Otimização de SEO",
+            "Migração de Servidor",
+        ],
+        "descricao": [
+            "Criar página responsiva para captação de alunos",
+            "Ajustar menu collapse no mobile",
+            "Desenvolver API REST para consulta de notas",
+            "Melhorar ranqueamento no Google",
+            "Migrar para servidor AWS",
+        ],
         "responsavel": ["Pedro", "Israel", "Vinícius", "Eduardo", "Pedro"],
-        "status": ["Concluído", "Em Desenvolvimento", "Code Review/QA", "Backlog/A Fazer", "Backlog/A Fazer"],
-        "tipo": ["Feature (Nova Funcionalidade)", "Bugfix (Correção)", "Feature (Nova Funcionalidade)", "Refatoração", "Infraestrutura"],
+        "status": [
+            "Concluído",
+            "Em Desenvolvimento",
+            "Code Review/QA",
+            "Backlog/A Fazer",
+            "Backlog/A Fazer",
+        ],
+        "tipo": [
+            "Feature (Nova Funcionalidade)",
+            "Bugfix (Correção)",
+            "Feature (Nova Funcionalidade)",
+            "Refatoração",
+            "Infraestrutura",
+        ],
         "prioridade": ["🟢 Média", "🔴 Urgente", "🟡 Alta", "⚪ Baixa", "🟡 Alta"],
-        "data_entrega": ["2025-12-01", "2025-11-25", "2025-11-30", "2025-12-15", "2026-01-10"],
+        "data_entrega": [
+            "2025-12-01",
+            "2025-11-25",
+            "2025-11-30",
+            "2025-12-15",
+            "2026-01-10",
+        ],
         "progresso": [100, 60, 90, 0, 10],
-        "data_criacao": [datetime.now().strftime("%Y-%m-%d")] * 5
+        "data_criacao": [datetime.now().strftime("%Y-%m-%d")] * 5,
     }
     df = pd.DataFrame(dados)
     salvar_dados_completo(df)
@@ -279,10 +350,12 @@ def atualizar_multiplas_celulas(task_id, campos_valores):
         for campo, valor in campos_valores.items():
             if campo in headers:
                 col_index = headers.index(campo) + 1
-                updates.append({
-                    'range': f'{gspread.utils.rowcol_to_a1(row_index, col_index)}',
-                    'values': [[str(valor)]]
-                })
+                updates.append(
+                    {
+                        "range": f"{gspread.utils.rowcol_to_a1(row_index, col_index)}",
+                        "values": [[str(valor)]],
+                    }
+                )
 
         # Executa todas as atualizações de uma vez (batch update)
         if updates:
@@ -337,17 +410,17 @@ def gerar_id_atomico_com_retry(max_tentativas=5):
 
             # Valida se o ID é único (dupla verificação)
             if novo_id in ids_existentes:
-                raise ValueError(
-                    f"ID {novo_id} já existe! Tentando novamente...")
+                raise ValueError(f"ID {novo_id} já existe! Tentando novamente...")
 
             return novo_id
 
         except gspread.exceptions.APIError as e:
             if "RATE_LIMIT_EXCEEDED" in str(e):
                 # Backoff exponencial com jitter
-                delay = (2 ** tentativa) + random.uniform(0, 1)
+                delay = (2**tentativa) + random.uniform(0, 1)
                 st.warning(
-                    f"Rate limit atingido. Aguardando {delay:.1f}s (tentativa {tentativa}/{max_tentativas})...")
+                    f"Rate limit atingido. Aguardando {delay:.1f}s (tentativa {tentativa}/{max_tentativas})..."
+                )
                 time.sleep(delay)
                 continue
             else:
@@ -357,12 +430,12 @@ def gerar_id_atomico_com_retry(max_tentativas=5):
             if tentativa < max_tentativas:
                 delay = 0.5 * tentativa + random.uniform(0, 0.5)
                 st.warning(
-                    f"Erro ao gerar ID (tentativa {tentativa}/{max_tentativas}): {e}")
+                    f"Erro ao gerar ID (tentativa {tentativa}/{max_tentativas}): {e}"
+                )
                 time.sleep(delay)
                 continue
             else:
-                st.error(
-                    f"Falha ao gerar ID após {max_tentativas} tentativas: {e}")
+                st.error(f"Falha ao gerar ID após {max_tentativas} tentativas: {e}")
                 raise e
 
     raise Exception("Falha ao gerar ID único após todas as tentativas")
@@ -389,7 +462,8 @@ def validar_id_unico(task_id):
 
         if len(ocorrencias) > 1:
             st.error(
-                f"ID {task_id} DUPLICADO! Encontradas {len(ocorrencias)} ocorrências.")
+                f"ID {task_id} DUPLICADO! Encontradas {len(ocorrencias)} ocorrências."
+            )
             return False
 
         return True
@@ -399,7 +473,9 @@ def validar_id_unico(task_id):
         return True  # Assume válido em caso de erro na validação
 
 
-def adicionar_tarefa_incremental_com_validacao(nova_tarefa_dict, validar_pos_insercao=True):
+def adicionar_tarefa_incremental_com_validacao(
+    nova_tarefa_dict, validar_pos_insercao=True
+):
     """
     Adiciona uma nova tarefa COM VALIDAÇÃO de ID único.
 
@@ -423,20 +499,25 @@ def adicionar_tarefa_incremental_com_validacao(nova_tarefa_dict, validar_pos_ins
         # Cria a linha na MESMA ORDEM dos cabeçalhos da planilha
         nova_linha = []
         for coluna in headers:
-            valor = nova_tarefa_dict.get(coluna, '')
+            valor = nova_tarefa_dict.get(coluna, "")
             nova_linha.append(str(valor))
 
         # Adiciona a linha no final da planilha
-        sheet.append_row(nova_linha, value_input_option='USER_ENTERED')
-        registrar_logs("criacao", nova_tarefa_dict.get('id'), {k: (None, nova_tarefa_dict.get(k)) for k in headers})
+        sheet.append_row(nova_linha, value_input_option="USER_ENTERED")
+        registrar_logs(
+            "criacao",
+            nova_tarefa_dict.get("id"),
+            {k: (None, nova_tarefa_dict.get(k)) for k in headers},
+        )
 
         # VALIDAÇÃO PÓS-INSERÇÃO (Opcional mas recomendado)
         if validar_pos_insercao:
             time.sleep(0.5)  # Aguarda propagação da API
 
-            if not validar_id_unico(nova_tarefa_dict['id']):
+            if not validar_id_unico(nova_tarefa_dict["id"]):
                 st.error(
-                    f"CONFLITO DETECTADO! ID {nova_tarefa_dict['id']} foi duplicado.")
+                    f"CONFLITO DETECTADO! ID {nova_tarefa_dict['id']} foi duplicado."
+                )
                 # Aqui você pode implementar lógica de rollback se necessário
                 return False
 
@@ -463,8 +544,7 @@ def adicionar_tarefa_com_fallback(nova_tarefa_dict):
     """
     # Tentativa 1: Método rápido com validação
     sucesso = adicionar_tarefa_incremental_com_validacao(
-        nova_tarefa_dict,
-        validar_pos_insercao=True
+        nova_tarefa_dict, validar_pos_insercao=True
     )
 
     if sucesso:
@@ -478,15 +558,21 @@ def adicionar_tarefa_com_fallback(nova_tarefa_dict):
         # Adiciona ao DataFrame local
         nova_linha_df = pd.DataFrame([nova_tarefa_dict])
         st.session_state.df_tarefas = pd.concat(
-            [st.session_state.df_tarefas, nova_linha_df],
-            ignore_index=True
+            [st.session_state.df_tarefas, nova_linha_df], ignore_index=True
         )
 
         # Salva tudo (método lento mas confiável)
         salvar_dados_completo(st.session_state.df_tarefas)
 
         st.success("Tarefa adicionada com sucesso (modo completo)!")
-        registrar_logs("criacao", nova_tarefa_dict.get('id'), {k: (None, nova_tarefa_dict.get(k)) for k in st.session_state.df_tarefas.columns})
+        registrar_logs(
+            "criacao",
+            nova_tarefa_dict.get("id"),
+            {
+                k: (None, nova_tarefa_dict.get(k))
+                for k in st.session_state.df_tarefas.columns
+            },
+        )
         return True
 
     except Exception as e:
@@ -513,8 +599,8 @@ def limpar_cache_conexao():
 
 
 # --- INICIALIZAÇÃO DO ESTADO ---
-if 'df_tarefas' not in st.session_state:
-    with st.spinner('Carregando dados da nuvem...'):
+if "df_tarefas" not in st.session_state:
+    with st.spinner("Carregando dados da nuvem..."):
         st.session_state.df_tarefas = carregar_dados()
 
 # --- BARRA LATERAL (SIDEBAR) ---
@@ -524,7 +610,7 @@ with st.sidebar:
 
     menu = st.radio(
         "Navegação",
-        ["Dashboard", "Quadro Kanban", "Nova Demanda", "Histórico", "Configurações"]
+        ["Dashboard", "Quadro Kanban", "Nova Demanda", "Histórico", "Configurações"],
     )
 
     st.divider()
@@ -538,28 +624,34 @@ if menu == "Dashboard":
     col_btn1, col_btn2 = st.columns([1, 3])
     with col_btn1:
         if st.button("🔄 Atualizar", use_container_width=True):
-            with st.spinner('Carregando...'):
+            with st.spinner("Carregando..."):
                 st.session_state.df_tarefas = carregar_dados()
             st.rerun()
 
     df = st.session_state.df_tarefas.copy()
-    df['progresso'] = pd.to_numeric(df['progresso'], errors='coerce').fillna(0)
-    df['data_entrega'] = pd.to_datetime(df['data_entrega'], errors='coerce')
+    df["progresso"] = pd.to_numeric(df["progresso"], errors="coerce").fillna(0)
+    df["data_entrega"] = pd.to_datetime(df["data_entrega"], errors="coerce")
 
     # Métricas (KPIs)
     col1, col2, col3, col4 = st.columns(4)
     total = len(df)
-    concluidas = len(df[df['status'] == "Concluído"])
-    em_andamento = len(df[df['status'] == "Em Desenvolvimento"])
-    atrasadas = len(df[(df['data_entrega'] < datetime.now())
-                    & (df['status'] != 'Concluído')])
+    concluidas = len(df[df["status"] == "Concluído"])
+    em_andamento = len(df[df["status"] == "Em Desenvolvimento"])
+    atrasadas = len(
+        df[(df["data_entrega"] < datetime.now()) & (df["status"] != "Concluído")]
+    )
 
     col1.metric("Total de Demandas", total)
-    col2.metric("Taxa de Conclusão",
-                f"{(concluidas/total*100):.1f}%" if total > 0 else "0%")
+    col2.metric(
+        "Taxa de Conclusão", f"{(concluidas/total*100):.1f}%" if total > 0 else "0%"
+    )
     col3.metric("Em Andamento", em_andamento)
-    col4.metric("⚠️ Atrasadas", atrasadas,
-                delta=f"-{atrasadas}" if atrasadas > 0 else "0", delta_color="inverse")
+    col4.metric(
+        "⚠️ Atrasadas",
+        atrasadas,
+        delta=f"-{atrasadas}" if atrasadas > 0 else "0",
+        delta_color="inverse",
+    )
 
     st.divider()
 
@@ -568,14 +660,17 @@ if menu == "Dashboard":
 
     with col_urgentes:
         st.subheader("🚨 Tarefas de Alta Prioridade")
-        df_urgentes = df[df['prioridade'].isin(
-            ['🔴 Urgente', '🟡 Alta']) & (df['status'] != 'Concluído')]
+        df_urgentes = df[
+            df["prioridade"].isin(["🔴 Urgente", "🟡 Alta"])
+            & (df["status"] != "Concluído")
+        ]
         if not df_urgentes.empty:
             st.dataframe(
-                df_urgentes[['titulo', 'responsavel', 'prioridade',
-                             'data_entrega', 'progresso']].sort_values('data_entrega'),
+                df_urgentes[
+                    ["titulo", "responsavel", "prioridade", "data_entrega", "progresso"]
+                ].sort_values("data_entrega"),
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
             )
         else:
             st.success("✅ Nenhuma tarefa urgente no momento!")
@@ -584,17 +679,18 @@ if menu == "Dashboard":
         st.subheader("📅 Próximas Entregas (15 dias)")
         hoje = datetime.now()
         df_proximas = df[
-            (df['data_entrega'] >= hoje) &
-            (df['data_entrega'] <= hoje + pd.Timedelta(days=15)) &
-            (df['status'] != 'Concluído')
-        ].sort_values('data_entrega')
+            (df["data_entrega"] >= hoje)
+            & (df["data_entrega"] <= hoje + pd.Timedelta(days=15))
+            & (df["status"] != "Concluído")
+        ].sort_values("data_entrega")
 
         if not df_proximas.empty:
             st.dataframe(
-                df_proximas[['titulo', 'responsavel',
-                             'data_entrega', 'prioridade', 'progresso']],
+                df_proximas[
+                    ["titulo", "responsavel", "data_entrega", "prioridade", "progresso"]
+                ],
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
             )
         else:
             st.info("Nenhuma entrega próxima nos próximos 15 dias.")
@@ -607,13 +703,24 @@ if menu == "Dashboard":
     with c1:
         st.subheader("👨🏻‍💻 Demandas por Desenvolvedor")
         if not df.empty:
-            fig_dev = px.bar(
-                df,
-                x="responsavel",
-                color="status",
-                title="Carga de Trabalho por Dev",
-                color_discrete_sequence=px.colors.qualitative.Pastel
+            # Agrupa dados para contagem
+            df_grouped = (
+                df.groupby(["responsavel", "status"])
+                .size()
+                .reset_index(name="quantidade")
             )
+
+            fig_dev = px.bar(
+                df_grouped,
+                x="responsavel",
+                y="quantidade",
+                color="status",
+                text="quantidade",  # Mostra o número na barra
+                title="Carga de Trabalho por Dev",
+                color_discrete_sequence=px.colors.qualitative.Pastel,
+            )
+            # Ajusta posição do texto para ficar dentro da barra
+            fig_dev.update_traces(textposition="auto")
             st.plotly_chart(fig_dev, use_container_width=True)
 
     with c2:
@@ -624,16 +731,25 @@ if menu == "Dashboard":
                 names="tipo",
                 title="Tipos de Demandas",
                 hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Set3
+                color_discrete_sequence=px.colors.qualitative.Set3,
             )
             st.plotly_chart(fig_type, use_container_width=True)
 
     st.subheader("Progresso Detalhado")
     st.dataframe(
-        df[['titulo', 'responsavel', 'status', 'prioridade', 'data_entrega',
-            'progresso', 'tipo']].style.highlight_max(axis=0, color='lightgreen'),
+        df[
+            [
+                "titulo",
+                "responsavel",
+                "status",
+                "prioridade",
+                "data_entrega",
+                "progresso",
+                "tipo",
+            ]
+        ].style.highlight_max(axis=0, color="lightgreen"),
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
     )
 
 # --- PÁGINA: KANBAN ---
@@ -659,24 +775,22 @@ elif menu == "Quadro Kanban":
 
     # Filtros
     c_filter1, c_filter2, c_filter3 = st.columns(3)
-    filtro_dev = c_filter1.multiselect(
-        "Filtrar por Desenvolvedor", DESENVOLVEDORES)
+    filtro_dev = c_filter1.multiselect("Filtrar por Desenvolvedor", DESENVOLVEDORES)
     filtro_tipo = c_filter2.multiselect("Filtrar por Tipo", TIPOS_TAREFA)
-    filtro_prioridade = c_filter3.multiselect(
-        "Filtrar por Prioridade", PRIORIDADES)
+    filtro_prioridade = c_filter3.multiselect("Filtrar por Prioridade", PRIORIDADES)
 
     df_view = st.session_state.df_tarefas.copy()
-    df_view['progresso'] = pd.to_numeric(
-        df_view['progresso'], errors='coerce').fillna(0)
-    df_view['data_entrega'] = pd.to_datetime(
-        df_view['data_entrega'], errors='coerce')
+    df_view["progresso"] = pd.to_numeric(df_view["progresso"], errors="coerce").fillna(
+        0
+    )
+    df_view["data_entrega"] = pd.to_datetime(df_view["data_entrega"], errors="coerce")
 
     if filtro_dev:
-        df_view = df_view[df_view['responsavel'].isin(filtro_dev)]
+        df_view = df_view[df_view["responsavel"].isin(filtro_dev)]
     if filtro_tipo:
-        df_view = df_view[df_view['tipo'].isin(filtro_tipo)]
+        df_view = df_view[df_view["tipo"].isin(filtro_tipo)]
     if filtro_prioridade:
-        df_view = df_view[df_view['prioridade'].isin(filtro_prioridade)]
+        df_view = df_view[df_view["prioridade"].isin(filtro_prioridade)]
 
     # Layout das Colunas do Kanban
     cols = st.columns(len(COLUNAS_KANBAN))
@@ -689,79 +803,101 @@ elif menu == "Quadro Kanban":
 
     for idx, coluna_nome in enumerate(COLUNAS_KANBAN):
         with cols[idx]:
-            tarefas_coluna = df_view[df_view['status']
-                                     == coluna_nome].sort_values('data_entrega')
+            tarefas_coluna = df_view[df_view["status"] == coluna_nome].sort_values(
+                "data_entrega"
+            )
             accent = cores.get(coluna_nome, "#6B7280")
             st.markdown(
                 f"<div class='kanban-header' style='--accent:{accent}'><span class='kanban-title'>{coluna_nome}</span><span class='kanban-count'>{len(tarefas_coluna)} tarefas</span></div>",
                 unsafe_allow_html=True,
             )
             if tarefas_coluna.empty:
-                st.markdown("<div class='kanban-empty'>Nenhuma tarefa nesta coluna</div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div class='kanban-empty'>Nenhuma tarefa nesta coluna</div>",
+                    unsafe_allow_html=True,
+                )
             else:
-                media_prog = int(pd.to_numeric(tarefas_coluna['progresso'], errors='coerce').fillna(0).mean())
+                media_prog = int(
+                    pd.to_numeric(tarefas_coluna["progresso"], errors="coerce")
+                    .fillna(0)
+                    .mean()
+                )
                 st.progress(media_prog / 100)
 
             for i, row in tarefas_coluna.iterrows():
                 # Calcular status do prazo
-                dias_restantes = (row['data_entrega'] - datetime.now()).days
+                dias_restantes = (row["data_entrega"] - datetime.now()).days
                 emoji_prazo = "⏰" if dias_restantes <= 3 else "📅"
-                cor_prazo = "red" if dias_restantes < 0 else "orange" if dias_restantes <= 3 else "green"
+                cor_prazo = (
+                    "red"
+                    if dias_restantes < 0
+                    else "orange" if dias_restantes <= 3 else "green"
+                )
 
                 # Card da Tarefa
-                with st.expander(f"#{row['id']} {row['prioridade']} - {row['titulo']}", expanded=True):
+                with st.expander(
+                    f"#{row['id']} {row['prioridade']} - {row['titulo']}", expanded=True
+                ):
                     col_info1, col_info2 = st.columns(2)
                     col_info1.caption(f"👨🏻‍💻 **{row['responsavel']}**")
                     col_info2.caption(f"🏷️ {row['tipo'].split()[0]}")
 
                     # Exibir prazo com destaque visual
                     st.markdown(
-                        f"**{emoji_prazo} Entrega:** :{cor_prazo}[{row['data_entrega'].strftime('%d/%m/%Y')}] ({dias_restantes} dias)")
-                    st.progress(int(row['progresso']) / 100)
+                        f"**{emoji_prazo} Entrega:** :{cor_prazo}[{row['data_entrega'].strftime('%d/%m/%Y')}] ({dias_restantes} dias)"
+                    )
+                    st.progress(int(row["progresso"]) / 100)
 
                     # Controles de Edição Rápida
                     novo_status = st.selectbox(
                         "Mover para:",
                         COLUNAS_KANBAN,
-                        index=COLUNAS_KANBAN.index(row['status']),
-                        key=f"status_{row['id']}"
+                        index=COLUNAS_KANBAN.index(row["status"]),
+                        key=f"status_{row['id']}",
                     )
 
                     novo_progresso = st.slider(
-                        "Progresso %", 0, 100, int(row['progresso']), 10,
-                        key=f"prog_{row['id']}"
+                        "Progresso %",
+                        0,
+                        100,
+                        int(row["progresso"]),
+                        10,
+                        key=f"prog_{row['id']}",
                     )
 
                     # Atualização Incremental
-                    if novo_status != row['status'] or novo_progresso != row['progresso']:
+                    if (
+                        novo_status != row["status"]
+                        or novo_progresso != row["progresso"]
+                    ):
                         # Atualiza no Session State
                         st.session_state.df_tarefas.loc[
-                            st.session_state.df_tarefas['id'] == row['id'], 'status'
+                            st.session_state.df_tarefas["id"] == row["id"], "status"
                         ] = novo_status
                         st.session_state.df_tarefas.loc[
-                            st.session_state.df_tarefas['id'] == row['id'], 'progresso'
+                            st.session_state.df_tarefas["id"] == row["id"], "progresso"
                         ] = novo_progresso
 
                         # Auto-completar se progresso = 100%
                         if novo_progresso == 100 and novo_status != "Concluído":
                             novo_status = "Concluído"
                             st.session_state.df_tarefas.loc[
-                                st.session_state.df_tarefas['id'] == row['id'], 'status'
+                                st.session_state.df_tarefas["id"] == row["id"], "status"
                             ] = "Concluído"
                             st.toast(f"✅ Tarefa #{row['id']} concluída!")
 
                         # Atualização incremental (rápida)
-                        with st.spinner('Salvando...'):
+                        with st.spinner("Salvando..."):
                             sucesso = atualizar_multiplas_celulas(
-                                row['id'],
-                                {'status': novo_status, 'progresso': novo_progresso}
+                                row["id"],
+                                {"status": novo_status, "progresso": novo_progresso},
                             )
 
                             if not sucesso:
                                 st.warning(
-                                    "Falha na atualização rápida. Tentando salvar tudo...")
-                                salvar_dados_completo(
-                                    st.session_state.df_tarefas)
+                                    "Falha na atualização rápida. Tentando salvar tudo..."
+                                )
+                                salvar_dados_completo(st.session_state.df_tarefas)
 
                         st.rerun()
 
@@ -770,36 +906,43 @@ elif menu == "Nova Demanda":
     st.header("Cadastro de Nova Demanda")
 
     # Controle de estado para exibir resumo
-    if 'tarefa_cadastrada' not in st.session_state:
+    if "tarefa_cadastrada" not in st.session_state:
         st.session_state.tarefa_cadastrada = None
 
     # Botão "Cadastrar Outra" FORA do form
     if st.session_state.tarefa_cadastrada is not None:
         st.success(
-            f"Última demanda cadastrada: **#{st.session_state.tarefa_cadastrada['id']} - {st.session_state.tarefa_cadastrada['titulo']}**")
+            f"Última demanda cadastrada: **#{st.session_state.tarefa_cadastrada['id']} - {st.session_state.tarefa_cadastrada['titulo']}**"
+        )
 
         # Mostra resumo
         with st.expander("Resumo da Última Tarefa", expanded=True):
             col_resumo1, col_resumo2 = st.columns(2)
 
             with col_resumo1:
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 - **ID:** #{st.session_state.tarefa_cadastrada['id']}
                 - **Título:** {st.session_state.tarefa_cadastrada['titulo']}
                 - **Responsável:** {st.session_state.tarefa_cadastrada['responsavel']}
                 - **Status:** {st.session_state.tarefa_cadastrada['status']}
-                """)
+                """
+                )
 
             with col_resumo2:
-                st.markdown(f"""
+                st.markdown(
+                    f"""
                 - **Tipo:** {st.session_state.tarefa_cadastrada['tipo'].split()[0]}
                 - **Prioridade:** {st.session_state.tarefa_cadastrada['prioridade']}
                 - **Entrega:** {st.session_state.tarefa_cadastrada['data_entrega']}
                 - **Criada em:** {st.session_state.tarefa_cadastrada['data_criacao']}
-                """)
+                """
+                )
 
         # Botão FORA do form
-        if st.button("Cadastrar Outra Demanda", use_container_width=True, type="primary"):
+        if st.button(
+            "Cadastrar Outra Demanda", use_container_width=True, type="primary"
+        ):
             st.session_state.tarefa_cadastrada = None
             st.rerun()
 
@@ -809,43 +952,33 @@ elif menu == "Nova Demanda":
     with st.form("form_nova_demanda", clear_on_submit=True):
         col1, col2 = st.columns(2)
         titulo = col1.text_input(
-            "Título da Demanda*",
-            placeholder="Ex: Atualização Portal do Aluno"
+            "Título da Demanda*", placeholder="Ex: Atualização Portal do Aluno"
         )
-        responsavel = col2.selectbox(
-            "Desenvolvedor Responsável*",
-            DESENVOLVEDORES
-        )
+        responsavel = col2.selectbox("Desenvolvedor Responsável*", DESENVOLVEDORES)
 
         col3, col4 = st.columns(2)
         tipo = col3.selectbox("Tipo de Demanda*", TIPOS_TAREFA)
         prioridade = col4.selectbox("Prioridade*", PRIORIDADES)
 
         col5, col6 = st.columns(2)
-        status_inicial = col5.selectbox(
-            "Status Inicial*",
-            COLUNAS_KANBAN,
-            index=0
-        )
+        status_inicial = col5.selectbox("Status Inicial*", COLUNAS_KANBAN, index=0)
         data_entrega = col6.date_input(
             "Data de Entrega*",
             value=datetime.now() + pd.Timedelta(days=7),
-            min_value=datetime.now()
+            min_value=datetime.now(),
         )
 
         descricao = st.text_area(
             "Descrição Detalhada (opcional)",
             placeholder="Descreva os requisitos técnicos, dependências, observações...",
-            height=120
+            height=120,
         )
 
         st.caption("*Campos obrigatórios")
 
         # APENAS form_submit_button é permitido dentro do form
         submitted = st.form_submit_button(
-            "Cadastrar Demanda",
-            use_container_width=True,
-            type="primary"
+            "Cadastrar Demanda", use_container_width=True, type="primary"
         )
 
     # PROCESSAMENTO FORA DO FORM
@@ -861,7 +994,7 @@ elif menu == "Nova Demanda":
 
         try:
             # Calcula o próximo ID
-            with st.spinner('Gerando ID...'):
+            with st.spinner("Gerando ID..."):
                 try:
                     novo_id = gerar_id_atomico_com_retry(max_tentativas=5)
                     st.info(f"ID #{novo_id} reservado com sucesso!")
@@ -880,19 +1013,18 @@ elif menu == "Nova Demanda":
                 "prioridade": prioridade,
                 "data_entrega": data_entrega.strftime("%Y-%m-%d"),
                 "progresso": 0,
-                "data_criacao": datetime.now().strftime("%Y-%m-%d")
+                "data_criacao": datetime.now().strftime("%Y-%m-%d"),
             }
 
             # Adiciona apenas a nova linha
-            with st.spinner('Salvando na nuvem (modo rápido)...'):
+            with st.spinner("Salvando na nuvem (modo rápido)..."):
                 sucesso = adicionar_tarefa_com_fallback(nova_tarefa)
 
             if sucesso:
                 # Atualiza o DataFrame local APENAS com a nova linha
                 nova_linha_df = pd.DataFrame([nova_tarefa])
                 st.session_state.df_tarefas = pd.concat(
-                    [st.session_state.df_tarefas, nova_linha_df],
-                    ignore_index=True
+                    [st.session_state.df_tarefas, nova_linha_df], ignore_index=True
                 )
 
                 # Salva no estado para exibir resumo
@@ -902,8 +1034,7 @@ elif menu == "Nova Demanda":
                 st.rerun()
 
             else:
-                st.error(
-                    "Não foi possível cadastrar a demanda. Tente novamente.")
+                st.error("Não foi possível cadastrar a demanda. Tente novamente.")
 
         except Exception as e:
             st.error(f"Erro inesperado ao cadastrar demanda: {e}")
@@ -917,22 +1048,21 @@ elif menu == "Nova Demanda":
 
     df_stats = st.session_state.df_tarefas
 
-    col_stat1.metric(
-        "Total de Tarefas",
-        len(df_stats),
-        delta="+1 ao cadastrar"
-    )
+    col_stat1.metric("Total de Tarefas", len(df_stats), delta="+1 ao cadastrar")
 
     col_stat2.metric(
         "Tarefas Ativas",
-        len(df_stats[df_stats['status'] != 'Concluído']),
-        delta_color="inverse"
+        len(df_stats[df_stats["status"] != "Concluído"]),
+        delta_color="inverse",
     )
 
     col_stat3.metric(
         "Próximo ID Disponível",
-        int(pd.to_numeric(df_stats['id'], errors='coerce').max(
-        ) + 1) if not df_stats.empty else 1
+        (
+            int(pd.to_numeric(df_stats["id"], errors="coerce").max() + 1)
+            if not df_stats.empty
+            else 1
+        ),
     )
 
 elif menu == "Histórico":
@@ -947,30 +1077,52 @@ elif menu == "Histórico":
         st.info("Nenhum log registrado.")
     else:
         df_logs = pd.DataFrame(registros)
-        if 'timestamp' in df_logs.columns:
+        if "timestamp" in df_logs.columns:
             try:
-                df_logs['timestamp'] = pd.to_datetime(df_logs['timestamp'], errors='coerce')
+                df_logs["timestamp"] = pd.to_datetime(
+                    df_logs["timestamp"], errors="coerce"
+                )
             except Exception:
                 pass
         colf1, colf2, colf3, colf4 = st.columns(4)
         filtro_id = colf1.text_input("Filtrar por ID", "")
-        filtro_acao = colf2.multiselect("Ações", sorted(df_logs['acao'].dropna().unique().tolist()))
-        filtro_usuario = colf3.multiselect("Usuário", sorted(df_logs['usuario'].dropna().unique().tolist()))
-        filtro_campo = colf4.multiselect("Campo", sorted(df_logs['campo'].dropna().unique().tolist()))
+        filtro_acao = colf2.multiselect(
+            "Ações", sorted(df_logs["acao"].dropna().unique().tolist())
+        )
+        filtro_usuario = colf3.multiselect(
+            "Usuário", sorted(df_logs["usuario"].dropna().unique().tolist())
+        )
+        filtro_campo = colf4.multiselect(
+            "Campo", sorted(df_logs["campo"].dropna().unique().tolist())
+        )
         if filtro_id.strip():
-            df_logs = df_logs[df_logs['task_id'].astype(str) == filtro_id.strip()]
+            df_logs = df_logs[df_logs["task_id"].astype(str) == filtro_id.strip()]
         if filtro_acao:
-            df_logs = df_logs[df_logs['acao'].isin(filtro_acao)]
+            df_logs = df_logs[df_logs["acao"].isin(filtro_acao)]
         if filtro_usuario:
-            df_logs = df_logs[df_logs['usuario'].isin(filtro_usuario)]
+            df_logs = df_logs[df_logs["usuario"].isin(filtro_usuario)]
         if filtro_campo:
-            df_logs = df_logs[df_logs['campo'].isin(filtro_campo)]
-        if 'timestamp' in df_logs.columns:
-            df_logs = df_logs.sort_values('timestamp', ascending=False)
+            df_logs = df_logs[df_logs["campo"].isin(filtro_campo)]
+        if "timestamp" in df_logs.columns:
+            df_logs = df_logs.sort_values("timestamp", ascending=False)
         st.dataframe(
-            df_logs[[c for c in ['timestamp','acao','task_id','campo','valor_antigo','valor_novo','usuario'] if c in df_logs.columns]],
+            df_logs[
+                [
+                    c
+                    for c in [
+                        "timestamp",
+                        "acao",
+                        "task_id",
+                        "campo",
+                        "valor_antigo",
+                        "valor_novo",
+                        "usuario",
+                    ]
+                    if c in df_logs.columns
+                ]
+            ],
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
         )
 
 # --- PÁGINA: CONFIGURAÇÕES ---
@@ -984,7 +1136,7 @@ elif menu == "Configurações":
 
     with col1:
         if st.button("Recarregar Dados", use_container_width=True):
-            with st.spinner('Carregando...'):
+            with st.spinner("Carregando..."):
                 st.session_state.df_tarefas = carregar_dados()
             st.success("Dados atualizados!")
             st.rerun()
@@ -1002,10 +1154,11 @@ elif menu == "Configurações":
     col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
 
     col_stats1.metric("Total de Tarefas", len(df))
-    col_stats2.metric("Desenvolvedores Ativos", df['responsavel'].nunique())
-    col_stats3.metric("Tipos de Demanda", df['tipo'].nunique())
-    col_stats4.metric("Estrutura Validada",
-                      "OK" if validar_estrutura_planilha(df)[0] else "Erro")
+    col_stats2.metric("Desenvolvedores Ativos", df["responsavel"].nunique())
+    col_stats3.metric("Tipos de Demanda", df["tipo"].nunique())
+    col_stats4.metric(
+        "Estrutura Validada", "OK" if validar_estrutura_planilha(df)[0] else "Erro"
+    )
 
     st.divider()
 
