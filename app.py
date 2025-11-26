@@ -56,11 +56,23 @@ SCOPES = [
 
 
 def obter_spreadsheet():
+    """
+    Obtém o objeto spreadsheet principal do Google Sheets.
+
+    Retorna:
+        gspread.models.Spreadsheet: O objeto da planilha conectada.
+    """
     sheet = conectar_google_sheets()
     return sheet.spreadsheet
 
 
 def obter_worksheet_logs():
+    """
+    Obtém a aba de logs da planilha, criando-a se não existir.
+
+    Retorna:
+        gspread.models.Worksheet: A aba de logs.
+    """
     ss = obter_spreadsheet()
     try:
         ws = ss.worksheet(NOME_ABA_LOGS)
@@ -83,6 +95,12 @@ def obter_worksheet_logs():
 
 
 def obter_usuario_atual():
+    """
+    Tenta identificar o usuário atual baseado em secrets ou variáveis de ambiente.
+
+    Retorna:
+        str: Nome do usuário ou 'Desconhecido'.
+    """
     try:
         return st.secrets.get(
             "usuario",
@@ -93,6 +111,15 @@ def obter_usuario_atual():
 
 
 def registrar_logs(acao, task_id, alteracoes, usuario=None):
+    """
+    Registra ações de alteração na aba de logs.
+
+    Args:
+        acao (str): Tipo de ação (ex: 'criacao', 'atualizacao').
+        task_id (int/str): ID da tarefa afetada.
+        alteracoes (dict): Dicionário {campo: (valor_antigo, valor_novo)}.
+        usuario (str, opcional): Nome do usuário que realizou a ação.
+    """
     ws = obter_worksheet_logs()
     if usuario is None:
         usuario = obter_usuario_atual()
@@ -123,6 +150,10 @@ def registrar_logs(acao, task_id, alteracoes, usuario=None):
 def conectar_google_sheets():
     """
     Estabelece conexão com o Google Sheets usando Service Account.
+    Utiliza cache do Streamlit para evitar re-autenticação frequente.
+
+    Retorna:
+        gspread.models.Worksheet: A primeira aba da planilha conectada.
     """
     try:
         if "gcp_service_account" in st.secrets:
@@ -171,7 +202,12 @@ def conectar_google_sheets():
 def validar_estrutura_planilha(df):
     """
     Valida se o DataFrame possui todas as colunas obrigatórias.
-    Retorna (bool, lista_colunas_faltantes)
+
+    Args:
+        df (pd.DataFrame): O DataFrame a ser validado.
+
+    Retorna:
+        tuple: (bool, list) - (True se válido, lista de colunas faltantes).
     """
     colunas_faltantes = [col for col in COLUNAS_OBRIGATORIAS if col not in df.columns]
     return len(colunas_faltantes) == 0, colunas_faltantes
@@ -181,6 +217,10 @@ def carregar_dados():
     """
     Carrega os dados da Planilha do Google com validação robusta.
     Detecta dados vazios, colunas faltantes e estrutura corrompida.
+    Realiza conversão de tipos (ID, datas, progresso) para garantir consistência.
+
+    Retorna:
+        pd.DataFrame: DataFrame com os dados das tarefas.
     """
     sheet = conectar_google_sheets()
 
@@ -235,6 +275,13 @@ def carregar_dados():
 def criar_dados_iniciais(sheet):
     """
     Cria dados fictícios e salva na planilha se ela estiver vazia ou corrompida.
+    Garante que o sistema tenha um estado inicial válido para demonstração.
+
+    Args:
+        sheet (gspread.models.Worksheet): A aba da planilha onde os dados serão salvos.
+
+    Retorna:
+        pd.DataFrame: O DataFrame com os dados iniciais criados.
     """
     dados = {
         "id": [1, 2, 3, 4, 5],
@@ -287,10 +334,15 @@ def criar_dados_iniciais(sheet):
 # --- SINCRONIZAÇÃO INCREMENTAL ---
 def atualizar_celula_especifica(task_id, campo, novo_valor):
     """
+    Atualiza uma única célula na planilha.
+
     Args:
-        task_id: ID da tarefa a ser atualizada
-        campo: Nome da coluna a ser modificada
-        novo_valor: Novo valor a ser inserido
+        task_id (int/str): ID da tarefa a ser atualizada.
+        campo (str): Nome da coluna a ser modificada.
+        novo_valor (any): Novo valor a ser inserido.
+
+    Retorna:
+        bool: True se sucesso, False caso contrário.
     """
     try:
         sheet = conectar_google_sheets()
@@ -324,11 +376,15 @@ def atualizar_celula_especifica(task_id, campo, novo_valor):
 
 def atualizar_multiplas_celulas(task_id, campos_valores):
     """
-    Atualiza múltiplas células de uma mesma linha de forma eficiente.
+    Atualiza múltiplas células de uma mesma linha de forma eficiente (Batch Update).
+    Minimiza chamadas de API agrupando as alterações.
 
     Args:
-        task_id: ID da tarefa
-        campos_valores: Dicionário {campo: novo_valor}
+        task_id (int/str): ID da tarefa.
+        campos_valores (dict): Dicionário {campo: novo_valor}.
+
+    Retorna:
+        bool: True se sucesso, False caso contrário.
     """
     try:
         sheet = conectar_google_sheets()
@@ -376,13 +432,16 @@ def atualizar_multiplas_celulas(task_id, campos_valores):
 def gerar_id_atomico_com_retry(max_tentativas=5):
     """
     Gera ID único consultando DIRETAMENTE a planilha (não o cache local).
-    Implementa retry com backoff exponencial para evitar race conditions.
+    Implementa retry com backoff exponencial para evitar race conditions em acessos concorrentes.
 
-    Returns:
-        int: ID único e seguro
+    Args:
+        max_tentativas (int): Número máximo de tentativas antes de falhar.
+
+    Retorna:
+        int: ID único e seguro gerado.
 
     Raises:
-        Exception: Se falhar após todas as tentativas
+        Exception: Se falhar após todas as tentativas.
     """
     for tentativa in range(1, max_tentativas + 1):
         try:
@@ -444,12 +503,13 @@ def gerar_id_atomico_com_retry(max_tentativas=5):
 def validar_id_unico(task_id):
     """
     Valida se o ID inserido é único na planilha.
+    Realiza uma busca na coluna de IDs para garantir que não haja duplicatas.
 
     Args:
-        task_id: ID a ser validado
+        task_id (int/str): ID a ser validado.
 
-    Returns:
-        bool: True se único, False se duplicado
+    Retorna:
+        bool: True se único, False se duplicado.
     """
     try:
         sheet = conectar_google_sheets()
@@ -477,14 +537,15 @@ def adicionar_tarefa_incremental_com_validacao(
     nova_tarefa_dict, validar_pos_insercao=True
 ):
     """
-    Adiciona uma nova tarefa COM VALIDAÇÃO de ID único.
+    Adiciona uma nova tarefa usando append_row (incremental) COM VALIDAÇÃO de ID único.
+    Este método é mais rápido que reescrever toda a planilha.
 
     Args:
-        nova_tarefa_dict: Dicionário com os dados da nova tarefa
-        validar_pos_insercao: Se True, valida se ID é único após inserção
+        nova_tarefa_dict (dict): Dicionário com os dados da nova tarefa.
+        validar_pos_insercao (bool): Se True, verifica se o ID duplicou após inserção.
 
-    Returns:
-        bool: True se sucesso, False se falhou
+    Retorna:
+        bool: True se sucesso, False se falhou.
     """
     try:
         sheet = conectar_google_sheets()
@@ -534,13 +595,14 @@ def adicionar_tarefa_incremental_com_validacao(
 def adicionar_tarefa_com_fallback(nova_tarefa_dict):
     """
     Tenta adicionar tarefa incrementalmente com validação.
-    Se falhar, usa o método completo como fallback.
+    Se falhar (por erro de API ou validação), usa o método completo (salvar_dados_completo) como fallback.
+    Isso garante alta disponibilidade mesmo em caso de falhas parciais.
 
     Args:
-        nova_tarefa_dict: Dicionário com os dados da nova tarefa
+        nova_tarefa_dict (dict): Dicionário com os dados da nova tarefa.
 
-    Returns:
-        bool: True se sucesso (qualquer método), False se ambos falharam
+    Retorna:
+        bool: True se sucesso (qualquer método), False se ambos falharam.
     """
     # Tentativa 1: Método rápido com validação
     sucesso = adicionar_tarefa_incremental_com_validacao(
@@ -583,7 +645,11 @@ def adicionar_tarefa_com_fallback(nova_tarefa_dict):
 def salvar_dados_completo(df):
     """
     Salva o DataFrame COMPLETO na Planilha (operação pesada).
-    Use apenas quando necessário (criar planilha, reset, etc).
+    Limpa a planilha inteira e reescreve todos os dados.
+    Use apenas quando necessário (criar planilha, reset, ou fallback de erro).
+
+    Args:
+        df (pd.DataFrame): DataFrame completo a ser salvo.
     """
     sheet = conectar_google_sheets()
     sheet.clear()
@@ -593,7 +659,10 @@ def salvar_dados_completo(df):
 
 # --- FUNÇÃO AUXILIAR PARA FORÇAR LIMPEZA DE CACHE ---
 def limpar_cache_conexao():
-    """Força recarregamento da conexão (útil após erros ou updates)"""
+    """
+    Força o recarregamento da conexão com o Google Sheets e limpa o cache de dados.
+    Útil após erros de conexão ou atualizações manuais na estrutura da planilha.
+    """
     conectar_google_sheets.clear()
     st.cache_data.clear()
 
@@ -1077,6 +1146,14 @@ elif menu == "Histórico":
         st.info("Nenhum log registrado.")
     else:
         df_logs = pd.DataFrame(registros)
+
+        # Garante que colunas com tipos mistos sejam convertidas para string
+        # Isso evita erro do PyArrow/Streamlit (ArrowTypeError)
+        if "valor_antigo" in df_logs.columns:
+            df_logs["valor_antigo"] = df_logs["valor_antigo"].astype(str)
+        if "valor_novo" in df_logs.columns:
+            df_logs["valor_novo"] = df_logs["valor_novo"].astype(str)
+
         if "timestamp" in df_logs.columns:
             try:
                 df_logs["timestamp"] = pd.to_datetime(
